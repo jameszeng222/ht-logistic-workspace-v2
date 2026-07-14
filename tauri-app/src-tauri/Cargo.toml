@@ -1,0 +1,30 @@
+[package]
+name = "pi-assistant"
+version = "0.1.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["devtools"] }
+tauri-plugin-log = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["sync", "time"] }
+dirs = "5"
+# Pure-Rust 7z decompressor: extracts bundled pi-runtime.7z to LOCALAPPDATA
+# on first launch. Avoids NSIS MAX_PATH 260-char limit (pi-runtime contains
+# @mistralai deeply nested files with paths >260 chars that NSIS can't package
+# as loose files).
+sevenz-rust2 = "0.13"
+# HTTP client for test_model_connection command (validates API keys by
+# sending a minimal chat completion request to the provider's API).
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

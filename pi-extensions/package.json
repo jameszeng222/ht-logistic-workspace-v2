@@ -1,0 +1,15 @@
+{
+  "name": "pi-assistant-all-in-one-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "全场景助理扩展：数据分析/文档处理/自动化/任务笔记（拷贝到 ~/.pi/agent/extensions/ 使用）",
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "pdf-parse": "^1.1.1"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*",
+    "typebox": "*"
+  }
+}

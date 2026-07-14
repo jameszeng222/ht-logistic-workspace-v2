@@ -1,0 +1,11 @@
+# HT Logistic Workspace 后端依赖
+fastapi>=0.110           # Web 框架，暴露工具 HTTP 接口
+uvicorn[standard]>=0.29  # ASGI 服务器
+python-multipart>=0.0.9  # 文件上传支持
+pandas>=2.2              # Excel/数据分析
+openpyxl>=3.1            # Excel 读写（箱单/发票模板填充）
+pdfplumber>=0.10         # PDF 文本提取（报关单提取）
+# OCR（报关单图片型 PDF 用，可选。需另装 Tesseract-OCR 程序）
+pytesseract>=0.3.10      # Tesseract OCR 封装
+Pillow>=10.2             # 图像处理（OCR 配合）
+# httpx>=0.27              # Pi 扩展回调工具接口用（后续启用）
