@@ -474,7 +474,7 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
                 )}
               </div>
 
-              <div className="tool-result-section">
+              {(running || !!error || hasResult) && <div className="tool-result-section">
                 <div className="tool-section-heading">
                   <div><strong>执行结果</strong><small>{running ? "工具正在处理" : hasResult ? "结果已就绪" : "执行后在这里查看结果"}</small></div>
                   {hasResult && onSendToAssistant && (
@@ -538,7 +538,7 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
                 {!running && jsonResult && (hsResults || analysisColumns) && (
                   <details className="tool-raw-result"><summary>查看原始 JSON</summary><pre>{jsonResult}</pre></details>
                 )}
-              </div>
+              </div>}
             </>
           ) : (
             <div className="tools-empty">请从左侧选择一个工具</div>

@@ -4448,3 +4448,44 @@ body {
     padding: 8px;
   }
 }
+
+/* V4.1: connect the global rail to the title bar and flatten tool chrome. */
+.app { overflow: hidden; background: #ecefed; }
+
+.header {
+  position: relative;
+  z-index: 5;
+  background: #ecefed;
+  border-bottom: 0;
+}
+
+.body.workspace-mode,
+.body.workspace-mode:has(.main.main-empty) {
+  padding-left: 0;
+  overflow: visible;
+}
+
+.mode-rail {
+  z-index: 8;
+  align-self: start;
+  height: calc(100% + var(--header-h) + 8px);
+  margin-top: calc(-1 * (var(--header-h) + 8px));
+  border-radius: 0;
+  background: #ecefed;
+}
+
+.tool-view .workspace-main,
+.tool-page,
+.tools-page-header,
+.tool-view .tools-body {
+  background: #ecefed;
+}
+
+.tools-page-header { padding-bottom: 9px; }
+
+@media (max-width: 900px) {
+  .body.workspace-mode,
+  .body.workspace-mode:has(.main.main-empty),
+  .body.workspace-mode.tool-view,
+  .body.workspace-mode.tool-view:has(.main.main-empty) { padding-left: 0; }
+}
