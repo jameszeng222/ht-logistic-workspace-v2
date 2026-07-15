@@ -24,19 +24,28 @@ import { FileBrowser } from "./FileBrowser";
 import { checkUpdate, downloadAndInstallUpdate, type UpdateStatus } from "./updater";
 import type { ToolCall, AssistantMsg, Turn } from "./types";
 import {
+  ArrowUp,
+  Bot,
   Box,
   ChartNoAxesCombined,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
+  CircleOff,
+  ClipboardList,
+  FileCheck2,
   FileOutput,
   Files,
   FileSearch,
   FolderOpen,
   MessageSquare,
+  Moon,
+  Paperclip,
   Plus,
   Search,
   Settings,
   Sheet,
+  Sun,
   Wrench,
 } from "lucide-react";
 import pilotAvatar from "./assets/pilot-avatar.png";
@@ -105,7 +114,7 @@ export default function App() {
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showPermissionDropdown, setShowPermissionDropdown] = useState(false);
   const [workspaceView, setWorkspaceView] = useState<"assistant" | "tool">("assistant");
-  const [contextPanelTab, setContextPanelTab] = useState<"history" | "files" | "outputs">("history");
+  const [contextPanelTab, setContextPanelTab] = useState<"files" | "outputs">("files");
   // 下拉框定位：用 fixed + Portal 渲染到 body，彻底脱离所有父容器 overflow 裁切
   const modelBtnRef = useRef<HTMLButtonElement>(null);
   const railModelBtnRef = useRef<HTMLButtonElement>(null);
@@ -1254,11 +1263,11 @@ export default function App() {
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
           title={theme === "dark" ? "切换到浅色" : "切换到深色"}
         >
-          {theme === "dark" ? "☀️" : "🌙"}
+          {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
         </button>
         {/* 调试日志 */}
         <button className={`icon-btn log-toggle ${stderrCount > 0 ? "has-warn" : ""}`} onClick={() => setShowLogViewer(true)} title="调试日志">
-          📋
+          <ClipboardList size={15} />
           {logs.length > 0 && <span className="badge">{logs.length}</span>}
         </button>
         {/* 窗口控制（自定义标题栏） */}
@@ -1280,7 +1289,7 @@ export default function App() {
         <aside className="workspace-nav" aria-label="工具与模型">
           <div className="workspace-nav-heading">
             <span className="workspace-nav-mark">HT</span>
-            <span>
+            <span className="workspace-nav-heading-copy">
               <strong>工作台</strong>
               <small>工具与模型</small>
             </span>
@@ -1288,18 +1297,20 @@ export default function App() {
 
           <button
             className="workspace-new-task"
-            onClick={() => { setWorkspaceView("assistant"); setContextPanelTab("history"); newSession(); }}
+            onClick={() => { setWorkspaceView("assistant"); setContextPanelTab("files"); newSession(); }}
             disabled={busy}
+            title="新建任务"
           >
             <Plus size={16} />
-            新建任务
+            <span className="workspace-new-task-label">新建任务</span>
           </button>
 
           <div className="workspace-nav-label">工作模式</div>
           <nav className="workspace-nav-list">
             <button
               className={`workspace-nav-item ${workspaceView === "assistant" ? "active" : ""}`}
-              onClick={() => { setWorkspaceView("assistant"); setContextPanelTab("history"); }}
+              onClick={() => { setWorkspaceView("assistant"); setContextPanelTab("files"); }}
+              title="AI 助手"
             >
               <span className="workspace-nav-icon"><MessageSquare size={17} /></span>
               <span className="workspace-nav-copy">
@@ -1310,7 +1321,10 @@ export default function App() {
             </button>
 
             {toolsList.length === 0 ? (
-              <div className="workspace-nav-empty">等待 Sidecar 工具上线…</div>
+              <div className="workspace-nav-empty" title="等待 Sidecar 工具上线">
+                <Wrench size={16} />
+                <span>等待 Sidecar 工具上线…</span>
+              </div>
             ) : toolsList.map((tool) => {
               const ToolIcon = tool.name.includes("发票") || tool.name.includes("装箱")
                 ? Files
@@ -1353,7 +1367,9 @@ export default function App() {
                 : (refreshModels(), openDropdown(railModelBtnRef.current, "model"))}
               title={`切换模型：${modelName}`}
             >
-              <span className="workspace-model-dot" />
+              <span className="workspace-model-icon">
+                <Bot className="workspace-model-symbol" size={17} />
+              </span>
               <span className="workspace-model-copy">
                 <strong>{modelName}</strong>
                 <small>{currentModel?.provider || "等待连接"} · {thinkingLevel === "off" ? "快速" : "思考"}</small>
@@ -1361,8 +1377,14 @@ export default function App() {
               <ChevronDown size={15} />
             </button>
             <div className="workspace-health">
-              <span className={ready ? "online" : "offline"}><i />Pi</span>
-              <span className={toolsList.length > 0 ? "online" : "offline"}><i />Sidecar</span>
+              <span className={ready ? "online" : "offline"} title={ready ? "Pi 在线" : "Pi 离线"}>
+                {ready ? <CheckCircle2 size={12} /> : <CircleOff size={12} />}
+                Pi {ready ? "在线" : "离线"}
+              </span>
+              <span className={toolsList.length > 0 ? "online" : "offline"} title={toolsList.length > 0 ? "Sidecar 在线" : "Sidecar 离线"}>
+                {toolsList.length > 0 ? <CheckCircle2 size={12} /> : <CircleOff size={12} />}
+                工具 {toolsList.length > 0 ? "在线" : "离线"}
+              </span>
               <button
                 className="workspace-settings-button"
                 onClick={() => { refreshEnvKeys(); loadSystemPrompt(systemPromptPath); loadModelsConfig(); setShowSettings(true); }}
@@ -1372,113 +1394,36 @@ export default function App() {
           </div>
         </aside>
 
-        <aside className="context-sidebar" aria-label={workspaceView === "assistant" ? "AI 助手上下文" : "工具文件"}>
+        <aside className="context-sidebar" aria-label="文件管理">
           <header className="context-sidebar-header">
             <div>
-              <strong>{workspaceView === "assistant" ? "AI 助手" : activeToolMirrored?.name || "业务工具"}</strong>
-              <small>{workspaceView === "assistant" ? "对话与工作文件" : "项目文件与生成结果"}</small>
+              <strong>工作文件</strong>
+              <small title={workdir || currentSessionCwd || undefined}>{workdir || currentSessionCwd || "选择工作目录后显示项目文件"}</small>
             </div>
-            {workspaceView === "assistant" && (
-              <button
-                className="context-header-button"
-                onClick={() => { setContextPanelTab("history"); newSession(); }}
-                disabled={busy}
-                title="新建对话"
-              ><Plus size={16} /></button>
-            )}
+            <button
+              className="context-header-button"
+              onClick={async () => {
+                try {
+                  const selected = await openDialog({ directory: true, multiple: false, defaultPath: workdir || undefined });
+                  if (!selected) return;
+                  const dir = Array.isArray(selected) ? selected[0] : selected;
+                  if (dir) await applyWorkdir(dir);
+                } catch (error) { toast(`选择目录失败: ${error}`, "error"); }
+              }}
+              title="打开工作目录"
+            ><FolderOpen size={16} /></button>
           </header>
 
           <div className="context-tabs" role="tablist">
-            {workspaceView === "assistant" ? (
-              <>
-                <button className={contextPanelTab === "history" ? "active" : ""} onClick={() => setContextPanelTab("history")}>
-                  <MessageSquare size={14} />历史对话
-                </button>
-                <button className={contextPanelTab === "files" ? "active" : ""} onClick={() => setContextPanelTab("files")}>
-                  <FolderOpen size={14} />工作文件
-                </button>
-              </>
-            ) : (
-              <>
-                <button className={contextPanelTab === "files" ? "active" : ""} onClick={() => setContextPanelTab("files")}>
-                  <FolderOpen size={14} />项目文件
-                </button>
-                <button className={contextPanelTab === "outputs" ? "active" : ""} onClick={() => setContextPanelTab("outputs")}>
-                  <FileOutput size={14} />最近输出
-                </button>
-              </>
-            )}
+            <button className={contextPanelTab === "files" ? "active" : ""} onClick={() => setContextPanelTab("files")}>
+              <FolderOpen size={14} />项目文件
+            </button>
+            <button className={contextPanelTab === "outputs" ? "active" : ""} onClick={() => setContextPanelTab("outputs")}>
+              <FileOutput size={14} />最近输出
+            </button>
           </div>
 
           <div className="context-sidebar-content">
-            {workspaceView === "assistant" && contextPanelTab === "history" && (
-              <div className="context-history">
-                <label className="context-search">
-                  <Search size={14} />
-                  <input
-                    type="search"
-                    placeholder="搜索历史对话"
-                    value={sessionSearch}
-                    onChange={(event) => setSessionSearch(event.target.value)}
-                  />
-                </label>
-                <div className="session-list context-session-list">
-                  {filteredSessions.length === 0 ? (
-                    <div className="context-empty">{sessions.length === 0 ? "暂无历史对话" : "没有匹配的对话"}</div>
-                  ) : projectSessions.map(([projectName, groupSessions]) => {
-                    const collapsed = collapsedProjects.has(projectName);
-                    return (
-                      <div key={projectName} className="session-group">
-                        <button className="session-group-header" onClick={() => toggleProjectCollapse(projectName)}>
-                          <span className="session-group-icon">{collapsed ? "▸" : "▾"}</span>
-                          <span className="session-group-title" title={projectName}>{projectName}</span>
-                          <span className="session-group-count">{groupSessions.length}</span>
-                        </button>
-                        {!collapsed && (
-                          <div className="session-group-items">
-                            {groupSessions.map((session) => {
-                              const isActive = currentSessionPath === session.path;
-                              const isPreviewing = previewPath === session.path && !isActive;
-                              const isRenaming = renamingPath === session.path;
-                              return (
-                                <div
-                                  key={session.path}
-                                  className={`session-item ${isActive ? "active" : ""} ${isPreviewing ? "previewing" : ""}`}
-                                  onClick={() => !isRenaming && switchSession(session.path)}
-                                >
-                                  <MessageSquare className="session-icon" size={14} />
-                                  <div className="session-info">
-                                    {isRenaming ? (
-                                      <input
-                                        className="session-rename-input"
-                                        autoFocus
-                                        value={renameInput}
-                                        onChange={(event) => setRenameInput(event.target.value)}
-                                        onClick={(event) => event.stopPropagation()}
-                                        onKeyDown={(event) => {
-                                          if (event.key === "Enter") { event.preventDefault(); confirmRename(); }
-                                          if (event.key === "Escape") { event.preventDefault(); setRenamingPath(null); }
-                                        }}
-                                        onBlur={() => confirmRename()}
-                                      />
-                                    ) : <div className="session-name">{session.title || "未命名对话"}</div>}
-                                  </div>
-                                  {isActive && !isRenaming && (
-                                    <button className="session-action-btn" onClick={(event) => { event.stopPropagation(); startRename(); }} title="重命名">✎</button>
-                                  )}
-                                  <button className="session-delete" onClick={(event) => deleteSession(session.path, event)} title="删除">×</button>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
             {contextPanelTab === "files" && (
               <FileBrowser
                 currentCwd={workdir || currentSessionCwd}
@@ -1489,7 +1434,7 @@ export default function App() {
               />
             )}
 
-            {workspaceView === "tool" && contextPanelTab === "outputs" && (
+            {contextPanelTab === "outputs" && (
               <div className="context-output-list">
                 {toolOutputs.length === 0 ? (
                   <div className="context-empty">
@@ -1676,10 +1621,46 @@ export default function App() {
                 </div>
               ) : turns.length === 0 ? (
                 <div className="empty-state">
-                  <div className="empty-mark">HT LOGISTIC AGENT</div>
-                  <h3>Logistic Workspace</h3>
-                  <p><span className="empty-pilot">Pilot</span> · 物流工作台 AI 调度员</p>
-                  <div className="empty-suggestions" style={{ display: "none" }} />
+                  <div className="empty-assistant-row">
+                    <img className="empty-pilot-avatar" src={pilotAvatar} alt="Pilot" />
+                    <div>
+                      <div className="empty-mark">PILOT 工作台</div>
+                      <h3>今天想处理什么物流工作？</h3>
+                      <p>选择左侧项目文件，或者直接告诉我任务。我会先检查资料，再调用对应工具完成处理。</p>
+                    </div>
+                  </div>
+                  <div className="empty-suggestion-grid">
+                    <button onClick={() => setInput("请检查当前项目资料是否完整，列出缺失文件、字段和下一步建议。") }>
+                      <span><FileCheck2 size={17} /></span>
+                      <strong>检查资料完整性</strong>
+                      <small>识别缺失文件与关键字段</small>
+                      <ChevronRight size={15} />
+                    </button>
+                    <button onClick={() => { setContextPanelTab("files"); setInput("请解读我从工作文件中选择的资料，总结关键信息和风险。") }}>
+                      <span><FolderOpen size={17} /></span>
+                      <strong>解读项目文件</strong>
+                      <small>结合所选文件给出摘要</small>
+                      <ChevronRight size={15} />
+                    </button>
+                    <button onClick={() => {
+                      const tool = toolsList.find((item) => item.name.includes("发票") || item.name.includes("装箱"));
+                      if (tool) { setWorkspaceView("tool"); setContextPanelTab("files"); toolsPanelRef.current?.selectTool(tool.id); }
+                    }}>
+                      <span><Files size={17} /></span>
+                      <strong>生成发票与装箱单</strong>
+                      <small>预检数据并按模板输出</small>
+                      <ChevronRight size={15} />
+                    </button>
+                    <button onClick={() => {
+                      const tool = toolsList.find((item) => item.name.includes("数据") || item.name.includes("分析"));
+                      if (tool) { setWorkspaceView("tool"); setContextPanelTab("files"); toolsPanelRef.current?.selectTool(tool.id); }
+                    }}>
+                      <span><ChartNoAxesCombined size={17} /></span>
+                      <strong>分析 Excel 数据</strong>
+                      <small>清洗、汇总并发现异常</small>
+                      <ChevronRight size={15} />
+                    </button>
+                  </div>
                 </div>
               ) : turns.map((turn) => (
                 <div key={turn.id} className="turn">
@@ -1801,7 +1782,7 @@ export default function App() {
                 {busy ? (
                   <button className="abort-btn" onClick={abort} title="中断">中断</button>
                 ) : (
-                  <button className="send-btn" onClick={() => send()} disabled={!inputCanSend} title="发送">发送</button>
+                  <button className="send-btn" onClick={() => send()} disabled={!inputCanSend} title="发送" aria-label="发送"><ArrowUp size={17} /></button>
                 )}
               </div>
               {/* 工具栏：左侧操作组（附件/模型/权限），右侧工具调用，中间 spacer 分隔 */}
@@ -1813,7 +1794,7 @@ export default function App() {
                     onClick={pickAttachments}
                     title="添加附件（Excel/Word/PDF 等）"
                   >
-                    附件
+                    <Paperclip size={15} />
                   </button>
                   <button
                     ref={modelBtnRef}
@@ -1835,8 +1816,8 @@ export default function App() {
                   </button>
                 </div>
                 <div className="composer-pill-group">
-                  <button type="button" className="composer-pill" onClick={() => { setInput("/"); setShowCmdPalette(true); }} title="斜杠命令 / 工具调用">
-                    工具调用
+                  <button type="button" className="composer-pill composer-tool-call" onClick={() => { setInput("/"); setShowCmdPalette(true); }} title="斜杠命令 / 工具调用" aria-label="工具调用">
+                    <Wrench size={15} />
                   </button>
                 </div>
               </div>
@@ -1903,7 +1884,7 @@ export default function App() {
           <section className={`tool-workbench ${workspaceView === "tool" ? "active" : ""}`}>
             <ToolsPanel
               ref={toolsPanelRef}
-              onSendToAssistant={(message) => { setWorkspaceView("assistant"); setContextPanelTab("history"); send(message); }}
+              onSendToAssistant={(message) => { setWorkspaceView("assistant"); setContextPanelTab("files"); send(message); }}
               onToolOutput={addToolOutput}
               onToolsChange={setToolsList}
               onActiveToolChange={setActiveToolMirrored}
