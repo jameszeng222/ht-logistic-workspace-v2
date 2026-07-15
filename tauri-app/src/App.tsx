@@ -57,6 +57,17 @@ interface JsonModel { id: string; name: string; }
 interface JsonProvider { baseUrl: string; api: string; apiKey: string; models: JsonModel[]; }
 interface ModelsConfig { providers: Record<string, JsonProvider>; }
 
+function formatSessionTime(timestamp: number) {
+  const value = timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const today = new Date();
+  if (date.toDateString() === today.toDateString()) {
+    return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  }
+  return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+}
+
 let toastId = 0;
 
 // ============ 主题 Hook ============
@@ -110,9 +121,11 @@ export default function App() {
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showPermissionDropdown, setShowPermissionDropdown] = useState(false);
   const [workspaceView, setWorkspaceView] = useState<"assistant" | "tool">("assistant");
+  const [assistantSidebarView, setAssistantSidebarView] = useState<"quick" | "projects">("quick");
   const [contextPanelTab, setContextPanelTab] = useState<"files" | "outputs">("files");
   // 下拉框定位：用 fixed + Portal 渲染到 body，彻底脱离所有父容器 overflow 裁切
   const modelBtnRef = useRef<HTMLButtonElement>(null);
+  const railModelBtnRef = useRef<HTMLButtonElement>(null);
   const permBtnRef = useRef<HTMLButtonElement>(null);
   const [dropdownPos, setDropdownPos] = useState<{ left: number; bottom: number; width: number } | null>(null);
   // 仅做定位与开关状态切换；模型列表刷新在按钮 onClick 中单独调用，避免依赖 refreshModels。
@@ -1225,8 +1238,6 @@ export default function App() {
     <div className="app">
       {/* ============ 顶栏 ============ */}
       <header className="header">
-        <button className="icon-btn" onClick={() => { setWorkspaceView("assistant"); setContextPanelTab("files"); newSession(); }} disabled={busy} title="新建任务"><Plus size={15} /></button>
-        <button className="icon-btn" onClick={() => { refreshEnvKeys(); loadSystemPrompt(systemPromptPath); loadModelsConfig(); setShowSettings(true); }} title="设置"><Settings size={15} /></button>
         <div className="app-brand">
           <span className="app-brand-mark">HT</span>
           <span>Logistic Workspace</span>
@@ -1287,7 +1298,7 @@ export default function App() {
           <nav className="mode-rail-list">
             <button
               className={`mode-rail-item ${workspaceView === "assistant" ? "active" : ""}`}
-              onClick={() => { setWorkspaceView("assistant"); setContextPanelTab("files"); }}
+              onClick={() => setWorkspaceView("assistant")}
               title="AI 助手"
             >
               <MessageSquare size={19} />
@@ -1302,9 +1313,110 @@ export default function App() {
               <span>工具</span>
             </button>
           </nav>
+          <div className="mode-rail-footer">
+            <button
+              ref={railModelBtnRef}
+              className="mode-rail-model"
+              onClick={() => showModelDropdown ? setShowModelDropdown(false) : (refreshModels(), openDropdown(railModelBtnRef.current, "model"))}
+              title={`选择模型：${modelName}`}
+            >
+              <span className="mode-rail-model-mark">AI</span>
+              <span>模型</span>
+            </button>
+            <div className="mode-rail-health" aria-label="服务状态">
+              <span className={ready ? "online" : "offline"} title={ready ? "Pi 已在线" : "Pi 未连接"}>
+                <i />Pi
+              </span>
+              <span className={toolsList.length > 0 ? "online" : "offline"} title={toolsList.length > 0 ? "Sidecar 已在线" : "Sidecar 未连接"}>
+                <i />Sidecar
+              </span>
+            </div>
+            <button
+              className="mode-rail-settings"
+              onClick={() => { refreshEnvKeys(); loadSystemPrompt(systemPromptPath); loadModelsConfig(); setShowSettings(true); }}
+              title="设置"
+            >
+              <Settings size={17} />
+              <span>设置</span>
+            </button>
+          </div>
         </aside>
 
-        {workspaceView === "assistant" && <aside className="context-sidebar" aria-label="文件管理">
+        {workspaceView === "assistant" && <aside className="assistant-sidebar" aria-label="AI 助手导航">
+          <div className="assistant-sidebar-top">
+            <button
+              className={`assistant-entry ${assistantSidebarView === "quick" ? "active" : ""}`}
+              onClick={() => setAssistantSidebarView("quick")}
+            >
+              <span className="assistant-entry-icon"><MessageSquare size={17} /></span>
+              <span><strong>快速问答</strong><small>直接开始对话</small></span>
+            </button>
+            <button className="assistant-new-chat" onClick={newSession} disabled={busy} title="新建快速问答">
+              <Plus size={16} />
+            </button>
+            <button
+              className={`assistant-entry assistant-project-entry ${assistantSidebarView === "projects" ? "active" : ""}`}
+              onClick={() => setAssistantSidebarView("projects")}
+            >
+              <span className="assistant-entry-icon"><FolderOpen size={17} /></span>
+              <span><strong>项目</strong><small>{projectSessions.length} 个工作区</small></span>
+              <ChevronRight size={15} />
+            </button>
+          </div>
+
+          <div className="assistant-history-heading">
+            <strong>{assistantSidebarView === "projects" ? "项目对话" : "历史对话"}</strong>
+            <span>{filteredSessions.length}</span>
+          </div>
+          {sessions.length > 0 && (
+            <label className="assistant-history-search">
+              <Search size={14} />
+              <input value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索历史对话" />
+            </label>
+          )}
+
+          <div className="assistant-history-list">
+            {filteredSessions.length === 0 ? (
+              <div className="assistant-history-empty">
+                <MessageSquare size={22} />
+                <span>{sessions.length === 0 ? "还没有历史对话" : "没有匹配的对话"}</span>
+              </div>
+            ) : assistantSidebarView === "quick" ? (
+              filteredSessions.map((session) => {
+                const active = (previewPath || currentSessionPath) === session.path;
+                return (
+                  <button key={session.path} className={`assistant-history-item ${active ? "active" : ""}`} onClick={() => switchSession(session.path)}>
+                    <MessageSquare size={14} />
+                    <span><strong>{session.title || session.name || "未命名会话"}</strong><small>{formatSessionTime(session.mtime)}</small></span>
+                  </button>
+                );
+              })
+            ) : projectSessions.map(([projectName, groupSessions]) => {
+              const collapsed = collapsedProjects.has(projectName);
+              return (
+                <section className="assistant-project-group" key={projectName}>
+                  <button className="assistant-project-heading" onClick={() => toggleProjectCollapse(projectName)}>
+                    {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                    <FolderOpen size={14} />
+                    <strong>{projectName}</strong>
+                    <span>{groupSessions.length}</span>
+                  </button>
+                  {!collapsed && groupSessions.map((session) => {
+                    const active = (previewPath || currentSessionPath) === session.path;
+                    return (
+                      <button key={session.path} className={`assistant-history-item project-item ${active ? "active" : ""}`} onClick={() => switchSession(session.path)}>
+                        <MessageSquare size={14} />
+                        <span><strong>{session.title || session.name || "未命名会话"}</strong><small>{formatSessionTime(session.mtime)}</small></span>
+                      </button>
+                    );
+                  })}
+                </section>
+              );
+            })}
+          </div>
+        </aside>}
+
+        {workspaceView === "tool" && <aside className="context-sidebar" aria-label="文件管理">
           <header className="context-sidebar-header">
             <div>
               <strong>工作文件</strong>
@@ -1536,7 +1648,7 @@ export default function App() {
                     <div>
                       <div className="empty-mark">PILOT 工作台</div>
                       <h3>今天想处理什么物流工作？</h3>
-                      <p>选择左侧项目文件，或者直接告诉我任务。我会先检查资料，再调用对应工具完成处理。</p>
+                      <p>直接描述任务或添加附件，需要批量处理时也可以切到工具页选择工作文件。</p>
                     </div>
                   </div>
                   <div className="empty-suggestion-grid">
@@ -1546,7 +1658,7 @@ export default function App() {
                       <small>识别缺失文件与关键字段</small>
                       <ChevronRight size={15} />
                     </button>
-                    <button onClick={() => { setContextPanelTab("files"); setInput("请解读我从工作文件中选择的资料，总结关键信息和风险。") }}>
+                    <button onClick={() => setInput("请解读我添加的资料，总结关键信息、潜在风险和下一步建议。")}>
                       <span><FolderOpen size={17} /></span>
                       <strong>解读项目文件</strong>
                       <small>结合所选文件给出摘要</small>
