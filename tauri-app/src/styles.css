@@ -4554,6 +4554,77 @@ body {
 .tools-detail::-webkit-scrollbar-thumb,
 .messages::-webkit-scrollbar-thumb { border-radius: 8px; background: #b7c0bb; }
 
+/* V4.4: keep scroll regions and footer rows inside the real WebView viewport. */
+.app,
+.body,
+.body.workspace-mode,
+.body.workspace-mode:has(.main.main-empty) {
+  min-height: 0;
+}
+
+.body,
+.body.workspace-mode,
+.body.workspace-mode:has(.main.main-empty) {
+  height: auto;
+}
+
+.context-sidebar-content {
+  display: flex;
+  min-height: 0;
+}
+
+.context-sidebar-content > .file-browser,
+.file-browser {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.fb-file-list {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.fb-statusbar {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  min-height: 30px;
+  background: #f7f9f8;
+}
+
+.assistant-surface,
+.assistant-sidebar,
+.assistant-history-list,
+.messages,
+.tool-page,
+.tools-body,
+.tools-list,
+.tools-list-scroll,
+.tools-detail {
+  min-height: 0;
+}
+
+.assistant-surface { overflow: hidden; }
+
+.assistant-history-list,
+.messages,
+.context-output-list,
+.tools-list-scroll,
+.tools-detail {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.assistant-history-list::-webkit-scrollbar-track,
+.context-output-list::-webkit-scrollbar-track,
+.fb-file-list::-webkit-scrollbar-track,
+.tools-list-scroll::-webkit-scrollbar-track,
+.tools-detail::-webkit-scrollbar-track,
+.messages::-webkit-scrollbar-track { background: rgba(183, 192, 187, .14); }
+
 @media (min-width: 761px) and (max-width: 900px) {
   :root {
     --mode-rail-w: 66px;
