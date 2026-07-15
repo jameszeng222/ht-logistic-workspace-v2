@@ -25,6 +25,7 @@ import { checkUpdate, downloadAndInstallUpdate, type UpdateStatus } from "./upda
 import type { ToolCall, AssistantMsg, Turn } from "./types";
 import {
   ArrowUp,
+  Bot,
   Box,
   ChartNoAxesCombined,
   ChevronDown,
@@ -33,15 +34,19 @@ import {
   FileCheck2,
   FileOutput,
   Files,
+  FolderInput,
   FolderOpen,
   MessageSquare,
+  MoreHorizontal,
   Moon,
   Paperclip,
+  Pencil,
   Plus,
   Search,
   Settings,
   Sheet,
   Sun,
+  Trash2,
   Wrench,
 } from "lucide-react";
 import pilotAvatar from "./assets/pilot-avatar.png";
@@ -66,6 +71,20 @@ function formatSessionTime(timestamp: number) {
     return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
   }
   return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+}
+
+function loadSessionMetadata(key: string) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || "{}");
+    return parsed && typeof parsed === "object" ? parsed as Record<string, string> : {};
+  } catch {
+    return {};
+  }
+}
+
+function naturalProjectName(session: SessionInfo) {
+  const cwd = session.cwd?.trim().replace(/[\\/]+$/, "") || "";
+  return cwd ? (cwd.split(/[\\/]/).pop() || cwd) : "Logistic Workspace";
 }
 
 let toastId = 0;
@@ -215,6 +234,11 @@ export default function App() {
   const [sessionSearch, setSessionSearch] = useState("");
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [renameInput, setRenameInput] = useState("");
+  const [sessionMenuPath, setSessionMenuPath] = useState<string | null>(null);
+  const [movingSessionPath, setMovingSessionPath] = useState<string | null>(null);
+  const [moveProjectInput, setMoveProjectInput] = useState("");
+  const [sessionTitleOverrides, setSessionTitleOverrides] = useState<Record<string, string>>(() => loadSessionMetadata("ht-session-titles"));
+  const [sessionProjectOverrides, setSessionProjectOverrides] = useState<Record<string, string>>(() => loadSessionMetadata("ht-session-projects"));
 
   // 引用
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -780,29 +804,77 @@ export default function App() {
     if (!confirm("确定删除这个会话？")) return;
     try {
       await invoke("delete_session", { path });
+      setSessionTitleOverrides((previous) => {
+        const next = { ...previous };
+        delete next[path];
+        localStorage.setItem("ht-session-titles", JSON.stringify(next));
+        return next;
+      });
+      setSessionProjectOverrides((previous) => {
+        const next = { ...previous };
+        delete next[path];
+        localStorage.setItem("ht-session-projects", JSON.stringify(next));
+        return next;
+      });
+      if (previewPath === path) { setPreviewPath(null); setTurns([]); }
+      setSessionMenuPath(null);
       await refreshSessions();
       toast("已删除", "success");
     } catch (err) { toast(`删除失败: ${err}`, "error"); }
-  }, [refreshSessions, toast]);
+  }, [previewPath, refreshSessions, toast]);
 
-  // 重命名当前会话
-  const startRename = useCallback(async () => {
-    // set_session_name 只能操作当前会话；用 piState 拿当前名
-    setRenameInput(piState?.sessionName || currentSessionName || "");
-    setRenamingPath(currentSessionPath);
-  }, [piState, currentSessionPath]);
+  const startRename = useCallback((session?: SessionInfo) => {
+    const path = session?.path || currentSessionPath;
+    if (!path) return;
+    setRenameInput(session ? (sessionTitleOverrides[path] || session.title || session.name || "") : (piState?.sessionName || ""));
+    setRenamingPath(path);
+    setSessionMenuPath(null);
+  }, [currentSessionPath, piState, sessionTitleOverrides]);
 
   const confirmRename = useCallback(async () => {
     if (!renamingPath) return;
+    const path = renamingPath;
     const name = renameInput.trim();
     if (!name) { setRenamingPath(null); return; }
+    setRenamingPath(null);
     try {
-      await rpc({ type: "set_session_name", name });
-      await refreshState(); await refreshSessions();
+      setSessionTitleOverrides((previous) => {
+        const next = { ...previous, [path]: name };
+        localStorage.setItem("ht-session-titles", JSON.stringify(next));
+        return next;
+      });
+      setSessions((previous) => previous.map((session) => session.path === path ? { ...session, title: name } : session));
+      if (path === currentSessionPath) {
+        try {
+          await rpc({ type: "set_session_name", name });
+          await refreshState();
+        } catch {
+          // 本地标题已经保存；Pi 恢复连接后仍可正常继续会话。
+        }
+      }
       toast("已重命名", "success");
     } catch (e) { toast(`重命名失败: ${e}`, "error"); }
-    setRenamingPath(null);
-  }, [renamingPath, renameInput, rpc, refreshState, refreshSessions, toast]);
+  }, [currentSessionPath, renamingPath, renameInput, rpc, refreshState, toast]);
+
+  const startMoveSession = useCallback((session: SessionInfo) => {
+    setMovingSessionPath(session.path);
+    setMoveProjectInput(sessionProjectOverrides[session.path] || naturalProjectName(session));
+    setSessionMenuPath(null);
+  }, [sessionProjectOverrides]);
+
+  const confirmMoveSession = useCallback(() => {
+    if (!movingSessionPath) return;
+    const project = moveProjectInput.trim();
+    if (!project) { setMovingSessionPath(null); return; }
+    setSessionProjectOverrides((previous) => {
+      const next = { ...previous, [movingSessionPath]: project };
+      localStorage.setItem("ht-session-projects", JSON.stringify(next));
+      return next;
+    });
+    setMovingSessionPath(null);
+    setAssistantSidebarView("projects");
+    toast(`已移动到项目：${project}`, "success");
+  }, [moveProjectInput, movingSessionPath, toast]);
 
   // clone 当前会话
   const cloneSession = useCallback(async () => {
@@ -1184,19 +1256,15 @@ export default function App() {
     return true;
   });
   const stderrCount = logs.filter((l) => l.type === "stderr").length;
-  const currentSessionName = piState?.sessionName || "";
-  // 预览历史会话时，标题条显示被预览会话的名称（而非当前活动会话名）。
-  const previewSession = previewPath && previewPath !== currentSessionPath
-    ? sessions.find((s) => s.path === previewPath)
-    : null;
-  const titlebarName = (previewSession?.title || previewSession?.name) || currentSessionName || "";
+  const displaySessionTitle = (session: SessionInfo) => sessionTitleOverrides[session.path] || session.title || session.name || "未命名会话";
   // 会话搜索过滤（匹配文件名 / 首条消息标题 / 工作目录）
   const filteredSessions = sessionSearch.trim()
     ? sessions.filter((s) => {
         const q = sessionSearch.toLowerCase();
         return (s.name || "").toLowerCase().includes(q)
-          || (s.title || "").toLowerCase().includes(q)
-          || (s.cwd || "").toLowerCase().includes(q);
+          || displaySessionTitle(s).toLowerCase().includes(q)
+          || (s.cwd || "").toLowerCase().includes(q)
+          || (sessionProjectOverrides[s.path] || "").toLowerCase().includes(q);
       })
     : sessions;
 
@@ -1210,17 +1278,16 @@ export default function App() {
   const projectSessions = useMemo(() => {
     const groups = new Map<string, SessionInfo[]>();
     for (const s of filteredSessions) {
-      const cwd = s.cwd?.trim();
-      const normalized = cwd ? cwd.replace(/[\\/]+$/, "") : "";
-      // 项目名只取最后一段目录名（缩写），避免显示完整路径
-      const projectName = normalized
-        ? (normalized.split(/[\\/]/).pop() || normalized)
-        : "Logistic Workspace";
+      const projectName = sessionProjectOverrides[s.path] || naturalProjectName(s);
       if (!groups.has(projectName)) groups.set(projectName, []);
       groups.get(projectName)!.push(s);
     }
     return Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [filteredSessions]);
+  }, [filteredSessions, sessionProjectOverrides]);
+
+  const availableProjectNames = useMemo(() => Array.from(new Set(
+    sessions.map((session) => sessionProjectOverrides[session.path] || naturalProjectName(session))
+  )).sort((a, b) => a.localeCompare(b)), [sessionProjectOverrides, sessions]);
 
   // 聊天框模型下拉框只显示已配置 API Key 且有模型列表的 provider 的模型。
   // 不合并 Pi 原生返回的模型（那些 provider 可能没配 API Key，选了也没用）。
@@ -1233,6 +1300,57 @@ export default function App() {
       p.models.map(m => ({ id: m.id, name: m.name, provider: id } as ModelInfo))
     );
   }, [modelsConfig]);
+
+  const renderAssistantSession = (session: SessionInfo, projectItem = false) => {
+    const active = (previewPath || currentSessionPath) === session.path;
+    const isRenaming = renamingPath === session.path;
+    const title = displaySessionTitle(session);
+    return (
+      <div key={session.path} className={`assistant-history-row ${active ? "active" : ""} ${projectItem ? "project-item" : ""} ${sessionMenuPath === session.path ? "menu-open" : ""}`}>
+        {isRenaming ? (
+          <label className="assistant-session-rename">
+            <Pencil size={13} />
+            <input
+              autoFocus
+              value={renameInput}
+              onChange={(event) => setRenameInput(event.target.value)}
+              onBlur={() => confirmRename()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") { event.preventDefault(); confirmRename(); }
+                if (event.key === "Escape") { event.preventDefault(); setRenamingPath(null); }
+              }}
+              aria-label="会话名称"
+            />
+          </label>
+        ) : (
+          <button className="assistant-history-main" onClick={() => { setSessionMenuPath(null); switchSession(session.path); }} title={title}>
+            <MessageSquare size={14} />
+            <span><strong>{title}</strong><small>{formatSessionTime(session.mtime)}</small></span>
+          </button>
+        )}
+        {!isRenaming && (
+          <button
+            className="assistant-session-more"
+            onClick={(event) => { event.stopPropagation(); setSessionMenuPath(sessionMenuPath === session.path ? null : session.path); }}
+            title="管理会话"
+            aria-label={`管理会话：${title}`}
+          >
+            <MoreHorizontal size={15} />
+          </button>
+        )}
+        {sessionMenuPath === session.path && (
+          <>
+            <button className="session-menu-dismiss" onClick={() => setSessionMenuPath(null)} aria-label="关闭会话菜单" />
+            <div className="assistant-session-menu">
+              <button onClick={() => startRename(session)}><Pencil size={14} />重命名</button>
+              <button onClick={() => startMoveSession(session)}><FolderInput size={14} />移动到项目</button>
+              <button className="danger" onClick={(event) => deleteSession(session.path, event)}><Trash2 size={14} />删除</button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="app">
@@ -1320,7 +1438,7 @@ export default function App() {
               onClick={() => showModelDropdown ? setShowModelDropdown(false) : (refreshModels(), openDropdown(railModelBtnRef.current, "model"))}
               title={`选择模型：${modelName}`}
             >
-              <span className="mode-rail-model-mark">AI</span>
+              <span className="mode-rail-footer-icon"><Bot size={16} /></span>
               <span>模型</span>
             </button>
             <div className="mode-rail-health" aria-label="服务状态">
@@ -1336,7 +1454,7 @@ export default function App() {
               onClick={() => { refreshEnvKeys(); loadSystemPrompt(systemPromptPath); loadModelsConfig(); setShowSettings(true); }}
               title="设置"
             >
-              <Settings size={17} />
+              <span className="mode-rail-footer-icon"><Settings size={16} /></span>
               <span>设置</span>
             </button>
           </div>
@@ -1359,7 +1477,7 @@ export default function App() {
               onClick={() => setAssistantSidebarView("projects")}
             >
               <span className="assistant-entry-icon"><FolderOpen size={17} /></span>
-              <span><strong>项目</strong><small>{projectSessions.length} 个工作区</small></span>
+              <span><strong>项目</strong><small>{availableProjectNames.length} 个工作区</small></span>
               <ChevronRight size={15} />
             </button>
           </div>
@@ -1382,15 +1500,7 @@ export default function App() {
                 <span>{sessions.length === 0 ? "还没有历史对话" : "没有匹配的对话"}</span>
               </div>
             ) : assistantSidebarView === "quick" ? (
-              filteredSessions.map((session) => {
-                const active = (previewPath || currentSessionPath) === session.path;
-                return (
-                  <button key={session.path} className={`assistant-history-item ${active ? "active" : ""}`} onClick={() => switchSession(session.path)}>
-                    <MessageSquare size={14} />
-                    <span><strong>{session.title || session.name || "未命名会话"}</strong><small>{formatSessionTime(session.mtime)}</small></span>
-                  </button>
-                );
-              })
+              filteredSessions.map((session) => renderAssistantSession(session))
             ) : projectSessions.map(([projectName, groupSessions]) => {
               const collapsed = collapsedProjects.has(projectName);
               return (
@@ -1401,15 +1511,7 @@ export default function App() {
                     <strong>{projectName}</strong>
                     <span>{groupSessions.length}</span>
                   </button>
-                  {!collapsed && groupSessions.map((session) => {
-                    const active = (previewPath || currentSessionPath) === session.path;
-                    return (
-                      <button key={session.path} className={`assistant-history-item project-item ${active ? "active" : ""}`} onClick={() => switchSession(session.path)}>
-                        <MessageSquare size={14} />
-                        <span><strong>{session.title || session.name || "未命名会话"}</strong><small>{formatSessionTime(session.mtime)}</small></span>
-                      </button>
-                    );
-                  })}
+                  {!collapsed && groupSessions.map((session) => renderAssistantSession(session, true))}
                 </section>
               );
             })}
@@ -1627,14 +1729,6 @@ export default function App() {
         <main className={`main workspace-main ${turns.length === 0 ? "main-empty" : ""}`}>
           <div className={`assistant-surface ${workspaceView === "assistant" ? "active" : ""}`}>
           <div className="messages" ref={messagesRef} onScroll={handleScroll}>
-            {/* 标题条：仅在有对话或已命名会话时显示，新会话空状态不显示 */}
-            {(turns.length > 0 || currentSessionName || previewSession) && (
-              <div className="chat-titlebar">
-                <span className="chat-titlebar-name" title={titlebarName || undefined}>
-                  {titlebarName || "新会话"}
-                </span>
-              </div>
-            )}
             <div className="messages-inner">
               {switching ? (
                 <div className="messages-loading">
@@ -1935,6 +2029,34 @@ export default function App() {
         {toasts.map((t) => <div key={t.id} className={`toast ${t.type}`}>{t.msg}</div>)}
       </div>
 
+      {movingSessionPath && (
+        <div className="modal-overlay" onClick={() => setMovingSessionPath(null)}>
+          <div className="modal session-move-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-title">移动到项目</div>
+            <p>选择已有项目，或输入一个新的项目名称。</p>
+            <input
+              className="modal-input"
+              autoFocus
+              list="session-project-options"
+              value={moveProjectInput}
+              onChange={(event) => setMoveProjectInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") { event.preventDefault(); confirmMoveSession(); }
+                if (event.key === "Escape") setMovingSessionPath(null);
+              }}
+              placeholder="项目名称"
+            />
+            <datalist id="session-project-options">
+              {availableProjectNames.map((name) => <option key={name} value={name} />)}
+            </datalist>
+            <div className="modal-actions">
+              <button className="btn-secondary" onClick={() => setMovingSessionPath(null)}>取消</button>
+              <button className="btn-primary" onClick={confirmMoveSession} disabled={!moveProjectInput.trim()}>移动</button>
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* ============ 扩展管理 Modal ============ */}
       {showExtManager && <ExtensionManager onClose={() => setShowExtManager(false)} />}
@@ -1991,7 +2113,7 @@ export default function App() {
       {/* ============ 设置面板 Modal ============ */}
       {showSettings && (
         <div className="modal-overlay" onClick={() => setShowSettings(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 720 }}>
+          <div className="modal settings-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 720 }}>
             <div className="modal-title">设置</div>
 
             {/* 工作目录：pi 子进程的 cwd，输入输出文件都在这里 */}

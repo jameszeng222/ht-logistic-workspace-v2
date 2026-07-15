@@ -125,7 +125,6 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
   onToolsChange,
   onActiveToolChange,
   recentFiles = [],
-  recentOutputs = [],
 }, ref) {
   const [tools, setTools] = useState<ToolDef[]>([]);
   const [sidecarUrl, setSidecarUrl] = useState("http://127.0.0.1:8000");
@@ -386,21 +385,6 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
                   <small>{workflowLabel(tool)} · {inputLabel(tool.input)} → {outputLabel(tool.output)}</small>
                 </span>
                 <ChevronRight size={15} />
-              </button>
-            ))}
-          </div>
-
-          <div className="tools-recent-output">
-            <div className="tools-list-title">最近输出</div>
-            {recentOutputs.length === 0 ? (
-              <span className="tools-recent-empty">执行结果会保留在这里</span>
-            ) : recentOutputs.slice(0, 3).map((output) => (
-              <button key={`${output.path}-${output.time}`} onClick={() => invoke("open_file", { path: output.path })} title={output.path}>
-                <FileOutput size={14} />
-                <span>
-                  <strong>{output.path.split(/[\\/]/).pop()}</strong>
-                  <small>{output.toolName} · {new Date(output.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small>
-                </span>
               </button>
             ))}
           </div>
