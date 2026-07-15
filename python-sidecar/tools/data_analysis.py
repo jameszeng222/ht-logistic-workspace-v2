@@ -20,6 +20,7 @@ from typing import Any
 
 import pandas as pd
 import numpy as np
+from openpyxl import load_workbook
 
 
 # 数值统计保留几位小数，避免浮点噪声
@@ -32,7 +33,13 @@ _TOP_N = 5
 _SAMPLE_N = 3
 
 
-def analyze_excel_data(data: bytes, file_name: str = "upload") -> dict[str, Any]:
+def analyze_excel_data(
+    data: bytes,
+    file_name: str = "upload",
+    input_format: str = "auto",
+    header_row: int = 1,
+    sheet_name: str = "",
+) -> dict[str, Any]:
     """分析 Excel/CSV 数据，返回结构化统计报告。
 
     Args:
@@ -61,7 +68,7 @@ def analyze_excel_data(data: bytes, file_name: str = "upload") -> dict[str, Any]
         }
     """
     # 1. 读文件
-    df = _read_data(data, file_name)
+    df = _read_data(data, file_name, input_format, header_row, sheet_name)
 
     # 2. 逐列分析
     columns = []
@@ -104,19 +111,95 @@ def analyze_excel_data(data: bytes, file_name: str = "upload") -> dict[str, Any]
     }
 
 
+def export_data(
+    data: bytes,
+    file_name: str = "upload",
+    input_format: str = "auto",
+    header_row: int = 1,
+    sheet_name: str = "",
+    output_format: str = "xlsx",
+    template_data: bytes | None = None,
+) -> bytes:
+    """按配置读取源数据，并导出 CSV 或套用用户 Excel 模板。"""
+    df = _read_data(data, file_name, input_format, header_row, sheet_name)
+    if output_format == "csv":
+        return df.to_csv(index=False).encode("utf-8-sig")
+    if output_format != "xlsx":
+        raise ValueError(f"不支持的输出格式：{output_format}")
+
+    if not template_data:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="数据分析")
+        return output.getvalue()
+
+    workbook = load_workbook(io.BytesIO(template_data))
+    worksheet = workbook.active
+    header_candidates = []
+    for row_index in range(1, min(worksheet.max_row, 20) + 1):
+        values = [worksheet.cell(row_index, column).value for column in range(1, worksheet.max_column + 1)]
+        count = sum(bool(value is not None and str(value).strip()) for value in values)
+        if count:
+            header_candidates.append((count, row_index, values))
+    if not header_candidates:
+        raise ValueError("输出模板中没有找到表头")
+    _, template_header_row, header_values = max(header_candidates, key=lambda item: (item[0], -item[1]))
+    source_columns = {str(column).strip(): column for column in df.columns}
+    mappings = [
+        (column_index, source_columns[str(header).strip()])
+        for column_index, header in enumerate(header_values, start=1)
+        if header is not None and str(header).strip() in source_columns
+    ]
+    if not mappings:
+        raise ValueError("模板表头与输入文件字段没有匹配项，请检查字段名称")
+
+    for row in worksheet.iter_rows(min_row=template_header_row + 1, max_row=worksheet.max_row):
+        for cell in row:
+            cell.value = None
+    for offset, (_, source_row) in enumerate(df.iterrows(), start=1):
+        target_row = template_header_row + offset
+        for target_column, source_column in mappings:
+            worksheet.cell(target_row, target_column).value = _excel_value(source_row[source_column])
+
+    output = io.BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
 # ============ 内部 ============
 
-def _read_data(data: bytes, file_name: str) -> pd.DataFrame:
-    """根据扩展名选 reader。CSV 走 read_csv，其余走 read_excel。"""
+def _read_data(
+    data: bytes,
+    file_name: str,
+    input_format: str = "auto",
+    header_row: int = 1,
+    sheet_name: str = "",
+) -> pd.DataFrame:
+    """按用户指定格式、表头行和工作表读取源数据。"""
     name = (file_name or "").lower()
-    if name.endswith(".csv"):
-        # 尝试 UTF-8，失败降级 GBK（中文 CSV 常用 GBK）
-        try:
-            return pd.read_csv(io.BytesIO(data), encoding="utf-8")
-        except UnicodeDecodeError:
-            return pd.read_csv(io.BytesIO(data), encoding="gbk")
-    # 默认当 Excel 读（.xlsx/.xls）
-    return pd.read_excel(io.BytesIO(data))
+    normalized_format = input_format if input_format in {"auto", "excel", "csv"} else "auto"
+    is_csv = normalized_format == "csv" or (normalized_format == "auto" and name.endswith(".csv"))
+    pandas_header = max(1, int(header_row or 1)) - 1
+    if is_csv:
+        for encoding in ("utf-8-sig", "utf-8", "gbk"):
+            try:
+                return pd.read_csv(io.BytesIO(data), encoding=encoding, header=pandas_header, sep=None, engine="python")
+            except UnicodeDecodeError:
+                continue
+        raise ValueError("无法识别 CSV 文件编码")
+    selected_sheet: str | int = sheet_name.strip() if sheet_name and sheet_name.strip() else 0
+    return pd.read_excel(io.BytesIO(data), sheet_name=selected_sheet, header=pandas_header)
+
+
+def _excel_value(value: Any) -> Any:
+    """把 pandas/numpy 值转换为 openpyxl 可写入的原生值。"""
+    if pd.isna(value):
+        return None
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, pd.Timestamp):
+        return value.to_pydatetime()
+    return value
 
 
 def _analyze_column(s: pd.Series) -> dict[str, Any]:

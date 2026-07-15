@@ -63,6 +63,8 @@ export interface ToolsPanelHandle {
 }
 
 type FileInput = Exclude<ToolDef["input"], "text">;
+type AnalysisInputFormat = "auto" | "excel" | "csv";
+type AnalysisOutputFormat = "report" | "xlsx" | "csv";
 
 const INPUT_FILTERS: Record<FileInput, { name: string; extensions: string[] }[]> = {
   excel: [{ name: "Excel / CSV", extensions: ["xlsx", "xls", "csv"] }],
@@ -137,6 +139,11 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
   const [savedPath, setSavedPath] = useState<string | null>(null);
   const [jsonResult, setJsonResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [analysisInputFormat, setAnalysisInputFormat] = useState<AnalysisInputFormat>("auto");
+  const [analysisOutputFormat, setAnalysisOutputFormat] = useState<AnalysisOutputFormat>("report");
+  const [analysisHeaderRow, setAnalysisHeaderRow] = useState(1);
+  const [analysisSheetName, setAnalysisSheetName] = useState("");
+  const [analysisTemplatePath, setAnalysisTemplatePath] = useState<string | null>(null);
   const lastReviewRef = useRef<{ key: string; time: number }>({ key: "", time: 0 });
 
   const visibleTools = useMemo(() => [...tools].sort((a, b) => {
@@ -273,12 +280,28 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
     if (!activeTool || activeTool.input === "text") return;
     clearExecution(false);
     try {
-      const selected = await openDialog({ multiple: false, filters: INPUT_FILTERS[activeTool.input] });
+      const filters = activeTool.id === "data-analysis"
+        ? analysisInputFormat === "excel"
+          ? [{ name: "Excel", extensions: ["xlsx", "xls"] }]
+          : analysisInputFormat === "csv"
+            ? [{ name: "CSV", extensions: ["csv"] }]
+            : INPUT_FILTERS.excel
+        : INPUT_FILTERS[activeTool.input];
+      const selected = await openDialog({ multiple: false, filters });
       if (typeof selected === "string" && selected) setFilePath(selected);
     } catch (e) {
       setError(`选文件失败：${e}`);
     }
-  }, [activeTool, clearExecution]);
+  }, [activeTool, analysisInputFormat, clearExecution]);
+
+  const pickAnalysisTemplate = useCallback(async () => {
+    try {
+      const selected = await openDialog({ multiple: false, filters: [{ name: "Excel 模板", extensions: ["xlsx"] }] });
+      if (typeof selected === "string" && selected) setAnalysisTemplatePath(selected);
+    } catch (e) {
+      setError(`选择模板失败：${e}`);
+    }
+  }, []);
 
   const runTool = useCallback(async () => {
     if (!activeTool || !hasInput || !sidecarReady) return;
@@ -309,19 +332,39 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
       const fileName = activeFilePath.split(/[\\/]/).pop() || "upload";
       const formData = new FormData();
       formData.append("file", new File([fileBlob], fileName), fileName);
+      if (activeTool.id === "data-analysis") {
+        formData.append("input_format", analysisInputFormat);
+        formData.append("output_format", analysisOutputFormat);
+        formData.append("header_row", String(Math.max(1, analysisHeaderRow)));
+        formData.append("sheet_name", analysisSheetName.trim());
+        if (analysisOutputFormat === "xlsx" && analysisTemplatePath) {
+          const templateBytes = await readFile(analysisTemplatePath);
+          const templateName = analysisTemplatePath.split(/[\\/]/).pop() || "template.xlsx";
+          formData.append("template", new File([new Blob([templateBytes])], templateName), templateName);
+        }
+      }
       const resp = await fetch(`${sidecarUrl}${activeTool.endpoint}`, { method: "POST", body: formData });
       if (!resp.ok) {
         const body = await resp.json().catch(() => null);
         throw new Error(body?.detail || `HTTP ${resp.status}`);
       }
 
-      if (activeTool.output === "json") {
+      const returnsJson = activeTool.id === "data-analysis"
+        ? analysisOutputFormat === "report"
+        : activeTool.output === "json";
+      if (returnsJson) {
         setJsonResult(JSON.stringify(await resp.json(), null, 2));
       } else {
         const resultBlob = await resp.blob();
-        const extension = OUTPUT_DEFAULT_NAME[activeTool.output].split(".")[1];
+        const resultOutput = activeTool.id === "data-analysis"
+          ? (analysisOutputFormat === "csv" ? "csv" : "excel")
+          : activeTool.output;
+        const extension = resultOutput === "csv" ? "csv" : OUTPUT_DEFAULT_NAME[resultOutput].split(".")[1];
         const defaultName = `${activeTool.id}-${new Date().toISOString().slice(0, 10)}.${extension}`;
-        const savePath = await saveDialog({ defaultPath: defaultName, filters: OUTPUT_FILTERS[activeTool.output] });
+        const filters = resultOutput === "csv"
+          ? [{ name: "CSV", extensions: ["csv"] }]
+          : OUTPUT_FILTERS[resultOutput];
+        const savePath = await saveDialog({ defaultPath: defaultName, filters });
         if (!savePath) {
           setError("已取消保存。结果尚未写入本地文件。");
           return;
@@ -336,7 +379,7 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
     } finally {
       setRunning(false);
     }
-  }, [activeTool, filePath, hasInput, onToolOutput, query, sidecarReady, sidecarUrl]);
+  }, [activeTool, analysisHeaderRow, analysisInputFormat, analysisOutputFormat, analysisSheetName, analysisTemplatePath, filePath, hasInput, onToolOutput, query, sidecarReady, sidecarUrl]);
 
   const hsResults = activeTool?.id === "hs-code" && Array.isArray(parsedResult?.results) ? parsedResult.results : null;
   const analysisColumns = activeTool?.id === "data-analysis" && Array.isArray(parsedResult?.columns) ? parsedResult.columns : null;
@@ -403,7 +446,9 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
                 </div>
                 <div className="tool-detail-meta">
                   <span>{inputLabel(activeTool.input)}</span>
-                  <span>{outputLabel(activeTool.output)}</span>
+                  <span>{activeTool.id === "data-analysis"
+                    ? analysisOutputFormat === "report" ? "在线分析" : analysisOutputFormat === "xlsx" ? "Excel 文件" : "CSV 文件"
+                    : outputLabel(activeTool.output)}</span>
                 </div>
               </div>
 
@@ -442,6 +487,47 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
                   </>
                 ) : (
                   <>
+                    {activeTool.id === "data-analysis" && (
+                      <div className="analysis-config-panel">
+                        <div className="analysis-config-heading">
+                          <strong>分析格式</strong>
+                          <small>按源文件结构读取，并选择本次结果的交付方式</small>
+                        </div>
+                        <div className="analysis-config-grid">
+                          <label>
+                            <span>输入格式</span>
+                            <select value={analysisInputFormat} onChange={(event) => { setAnalysisInputFormat(event.target.value as AnalysisInputFormat); clearExecution(false); }}>
+                              <option value="auto">自动识别</option>
+                              <option value="excel">Excel</option>
+                              <option value="csv">CSV</option>
+                            </select>
+                          </label>
+                          <label>
+                            <span>表头所在行</span>
+                            <input type="number" min="1" value={analysisHeaderRow} onChange={(event) => { setAnalysisHeaderRow(Math.max(1, Number(event.target.value) || 1)); clearExecution(false); }} />
+                          </label>
+                          <label>
+                            <span>工作表</span>
+                            <input value={analysisSheetName} disabled={analysisInputFormat === "csv"} onChange={(event) => { setAnalysisSheetName(event.target.value); clearExecution(false); }} placeholder="默认第一个" />
+                          </label>
+                          <label>
+                            <span>输出方式</span>
+                            <select value={analysisOutputFormat} onChange={(event) => { setAnalysisOutputFormat(event.target.value as AnalysisOutputFormat); clearExecution(false); }}>
+                              <option value="report">在线分析报告</option>
+                              <option value="xlsx">Excel 文件</option>
+                              <option value="csv">CSV 文件</option>
+                            </select>
+                          </label>
+                        </div>
+                        {analysisOutputFormat === "xlsx" && (
+                          <div className="analysis-template-row">
+                            <button type="button" onClick={pickAnalysisTemplate}><FileSpreadsheet size={15} />{analysisTemplatePath ? "更换输出模板" : "选择输出模板"}</button>
+                            <span title={analysisTemplatePath || ""}>{analysisTemplatePath ? analysisTemplatePath.split(/[\\/]/).pop() : "可选；按模板表头写入并保留样式"}</span>
+                            {analysisTemplatePath && <button type="button" className="analysis-template-clear" onClick={() => setAnalysisTemplatePath(null)} title="移除模板"><X size={14} /></button>}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <button className={`file-pick-zone ${filePath ? "has-file" : ""}`} onClick={pickFile}>
                       {filePath ? (
                         <>

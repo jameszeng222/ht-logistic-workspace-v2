@@ -250,6 +250,7 @@ export default function App() {
   const currentMsgId = useRef<string | null>(null);
   // 跟踪 Pi 当前 sessionFile 的最新值，供 scan_sessions 作为权威路径提示反推会话根目录。
   const sessionFileRef = useRef<string | undefined>(undefined);
+  const pendingNewSessionRef = useRef(false);
 
   // 流式节流
   const pendingTextRef = useRef<Map<string, string>>(new Map());
@@ -757,18 +758,18 @@ export default function App() {
   }, [showCmdPalette, showModelDropdown, showPermissionDropdown]);
 
   // ====== 会话操作 ======
-  const newSession = useCallback(async () => {
+  const newSession = useCallback(() => {
     if (busy) { toast("请等待当前任务完成", "info"); return; }
-    try {
-      await invoke("send_command", { command: { type: "new_session" } });
-      setTurns([]); currentTurnId.current = null; currentMsgId.current = null;
-      pendingTextRef.current.clear(); pendingThinkingRef.current.clear();
-      setAutoFollow(true);
-      setPreviewPath(null);
-      await refreshState(); await refreshSessions();
-      toast("已新建会话", "success");
-    } catch (e) { toast(`新建失败: ${e}`, "error"); }
-  }, [busy, toast, refreshState, refreshSessions]);
+    pendingNewSessionRef.current = true;
+    setTurns([]); currentTurnId.current = null; currentMsgId.current = null;
+    pendingTextRef.current.clear(); pendingThinkingRef.current.clear();
+    setInput("");
+    setAttachments([]);
+    setCurrentSessionPath(null);
+    setAutoFollow(true);
+    setPreviewPath(null);
+    setAssistantSidebarView("quick");
+  }, [busy, toast]);
 
   const switchSession = useCallback(async (path: string) => {
     // 预览模式：不调 switch_session RPC，直接读会话文件历史显示。
@@ -779,6 +780,7 @@ export default function App() {
     // 性能：会话历史重建 + 全量 Markdown 渲染是同步重活，直接 setTurns
     // 会阻塞主线程导致点击后卡顿。先清空 turns 并显示 loading，让浏览器
     // 渲染一帧，再异步读取+重建，UI 立即响应。
+    pendingNewSessionRef.current = false;
     setTurns([]);
     setSwitching(true);
     try {
@@ -1219,6 +1221,16 @@ export default function App() {
       // 注意：Pi 没有 /clear 命令（会话为 append-only，无法清空），曾把 /clear 当作新建会话，
       //       语义混淆，已移除。如需清空请用 /new 新建会话。
     }
+    if (pendingNewSessionRef.current) {
+      try {
+        await invoke("send_command", { command: { type: "new_session" } });
+        pendingNewSessionRef.current = false;
+        await refreshState();
+      } catch (e) {
+        toast(`新建会话失败: ${e}`, "error");
+        return;
+      }
+    }
     // 拼接附件路径到消息（Pi 可读取这些路径的文件内容）
     // 文本为空但有附件时，用默认文案让 AI 知道用户意图是分析附件
     const userText = rawMsg || "请分析这些附件文件。";
@@ -1391,6 +1403,10 @@ export default function App() {
           {ready ? (busy ? "思考中" : "就绪") : "未连接"}
         </span>
         <div className="header-spacer" />
+        <div className="header-service-health" aria-label="服务状态">
+          <span className={ready ? "online" : "offline"} title={ready ? "Pi 已在线" : "Pi 未连接"}><i />Pi</span>
+          <span className={toolsList.length > 0 ? "online" : "offline"} title={toolsList.length > 0 ? "Sidecar 已在线" : "Sidecar 未连接"}><i />Sidecar</span>
+        </div>
         {/* 工作目录：右移至 spacer 之后，与日志/主题一组，左侧保持品牌+状态更干净 */}
         <button
           className="icon-btn workdir-btn"
@@ -1467,14 +1483,6 @@ export default function App() {
               <span className="mode-rail-footer-icon"><Bot size={16} /></span>
               <span>模型</span>
             </button>
-            <div className="mode-rail-health" aria-label="服务状态">
-              <span className={ready ? "online" : "offline"} title={ready ? "Pi 已在线" : "Pi 未连接"}>
-                <i />Pi
-              </span>
-              <span className={toolsList.length > 0 ? "online" : "offline"} title={toolsList.length > 0 ? "Sidecar 已在线" : "Sidecar 未连接"}>
-                <i />Sidecar
-              </span>
-            </div>
             <button
               className="mode-rail-settings"
               onClick={() => { refreshEnvKeys(); loadSystemPrompt(systemPromptPath); loadModelsConfig(); setShowSettings(true); }}
@@ -1490,7 +1498,7 @@ export default function App() {
           <div className="assistant-sidebar-top">
             <button
               className={`assistant-entry ${assistantSidebarView === "quick" ? "active" : ""}`}
-              onClick={() => setAssistantSidebarView("quick")}
+              onClick={newSession}
             >
               <span className="assistant-entry-icon"><MessageSquare size={17} /></span>
               <span><strong>快速问答</strong><small>直接开始对话</small></span>

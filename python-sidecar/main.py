@@ -17,7 +17,7 @@ from __future__ import annotations
 import io
 import zipfile
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
@@ -158,17 +158,41 @@ async def extract_customs(file: UploadFile = File(...)):
 
 
 @app.post("/api/tools/data-analysis")
-async def analyze_data(file: UploadFile = File(...)):
-    """Excel 数据分析：上传 Excel/CSV → 返回 JSON 统计报告。
-
-    不返回文件，直接返回结构化 JSON，前端展示，AI 可解读。
-    """
+async def analyze_data(
+    file: UploadFile = File(...),
+    input_format: str = Form("auto"),
+    output_format: str = Form("report"),
+    header_row: int = Form(1),
+    sheet_name: str = Form(""),
+    template: UploadFile | None = File(None),
+):
+    """按指定结构读取 Excel/CSV，并返回在线报告或可保存文件。"""
     content = await file.read()
     try:
-        result = data_analysis.analyze_excel_data(content, file.filename or "upload.xlsx")
+        options = {
+            "input_format": input_format,
+            "header_row": header_row,
+            "sheet_name": sheet_name,
+        }
+        if output_format == "report":
+            return data_analysis.analyze_excel_data(content, file.filename or "upload.xlsx", **options)
+        template_content = await template.read() if template is not None else None
+        result = data_analysis.export_data(
+            content,
+            file.filename or "upload.xlsx",
+            output_format=output_format,
+            template_data=template_content,
+            **options,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"分析失败：{e}")
-    return result
+    media_type = "text/csv; charset=utf-8" if output_format == "csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    extension = "csv" if output_format == "csv" else "xlsx"
+    return Response(
+        content=result,
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename=data-analysis.{extension}"},
+    )
 
 
 @app.get("/api/tools/hs-code")
