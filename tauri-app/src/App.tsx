@@ -25,18 +25,14 @@ import { checkUpdate, downloadAndInstallUpdate, type UpdateStatus } from "./upda
 import type { ToolCall, AssistantMsg, Turn } from "./types";
 import {
   ArrowUp,
-  Bot,
   Box,
   ChartNoAxesCombined,
-  CheckCircle2,
   ChevronDown,
   ChevronRight,
-  CircleOff,
   ClipboardList,
   FileCheck2,
   FileOutput,
   Files,
-  FileSearch,
   FolderOpen,
   MessageSquare,
   Moon,
@@ -117,7 +113,6 @@ export default function App() {
   const [contextPanelTab, setContextPanelTab] = useState<"files" | "outputs">("files");
   // 下拉框定位：用 fixed + Portal 渲染到 body，彻底脱离所有父容器 overflow 裁切
   const modelBtnRef = useRef<HTMLButtonElement>(null);
-  const railModelBtnRef = useRef<HTMLButtonElement>(null);
   const permBtnRef = useRef<HTMLButtonElement>(null);
   const [dropdownPos, setDropdownPos] = useState<{ left: number; bottom: number; width: number } | null>(null);
   // 仅做定位与开关状态切换；模型列表刷新在按钮 onClick 中单独调用，避免依赖 refreshModels。
@@ -1230,7 +1225,8 @@ export default function App() {
     <div className="app">
       {/* ============ 顶栏 ============ */}
       <header className="header">
-        <button className="icon-btn" onClick={() => { refreshEnvKeys(); loadSystemPrompt(systemPromptPath); loadModelsConfig(); setShowSettings(true); }} title="设置">☰</button>
+        <button className="icon-btn" onClick={() => { setWorkspaceView("assistant"); setContextPanelTab("files"); newSession(); }} disabled={busy} title="新建任务"><Plus size={15} /></button>
+        <button className="icon-btn" onClick={() => { refreshEnvKeys(); loadSystemPrompt(systemPromptPath); loadModelsConfig(); setShowSettings(true); }} title="设置"><Settings size={15} /></button>
         <div className="app-brand">
           <span className="app-brand-mark">HT</span>
           <span>Logistic Workspace</span>
@@ -1285,116 +1281,30 @@ export default function App() {
       </header>
 
       {/* ============ 主体 ============ */}
-      <div className="body workspace-mode">
-        <aside className="workspace-nav" aria-label="工具与模型">
-          <div className="workspace-nav-heading">
-            <span className="workspace-nav-mark">HT</span>
-            <span className="workspace-nav-heading-copy">
-              <strong>工作台</strong>
-              <small>工具与模型</small>
-            </span>
-          </div>
-
-          <button
-            className="workspace-new-task"
-            onClick={() => { setWorkspaceView("assistant"); setContextPanelTab("files"); newSession(); }}
-            disabled={busy}
-            title="新建任务"
-          >
-            <Plus size={16} />
-            <span className="workspace-new-task-label">新建任务</span>
-          </button>
-
-          <div className="workspace-nav-label">工作模式</div>
-          <nav className="workspace-nav-list">
+      <div className={`body workspace-mode ${workspaceView === "tool" ? "tool-view" : "assistant-view"}`}>
+        <aside className="mode-rail" aria-label="页面切换">
+          <div className="mode-rail-brand" title="HT Logistic Workspace">HT</div>
+          <nav className="mode-rail-list">
             <button
-              className={`workspace-nav-item ${workspaceView === "assistant" ? "active" : ""}`}
+              className={`mode-rail-item ${workspaceView === "assistant" ? "active" : ""}`}
               onClick={() => { setWorkspaceView("assistant"); setContextPanelTab("files"); }}
               title="AI 助手"
             >
-              <span className="workspace-nav-icon"><MessageSquare size={17} /></span>
-              <span className="workspace-nav-copy">
-                <strong>AI 助手</strong>
-                <small>问答、解读与写作</small>
-              </span>
-              <ChevronRight size={15} />
+              <MessageSquare size={19} />
+              <span>AI 助手</span>
             </button>
-
-            {toolsList.length === 0 ? (
-              <div className="workspace-nav-empty" title="等待 Sidecar 工具上线">
-                <Wrench size={16} />
-                <span>等待 Sidecar 工具上线…</span>
-              </div>
-            ) : toolsList.map((tool) => {
-              const ToolIcon = tool.name.includes("发票") || tool.name.includes("装箱")
-                ? Files
-                : tool.name.includes("数据") || tool.name.includes("分析")
-                  ? ChartNoAxesCombined
-                  : tool.name.includes("报关") || tool.name.includes("海关")
-                    ? FileSearch
-                    : Wrench;
-              return (
-                <button
-                  key={tool.id}
-                  className={`workspace-nav-item ${workspaceView === "tool" && activeToolMirrored?.id === tool.id ? "active" : ""}`}
-                  onClick={() => {
-                    setWorkspaceView("tool");
-                    setContextPanelTab("files");
-                    toolsPanelRef.current?.selectTool(tool.id);
-                  }}
-                  title={tool.description}
-                >
-                  <span className="workspace-nav-icon"><ToolIcon size={17} /></span>
-                  <span className="workspace-nav-copy">
-                    <strong>{tool.name}</strong>
-                    <small>{tool.input.toUpperCase()} → {tool.output.toUpperCase()}</small>
-                  </span>
-                  <ChevronRight size={15} />
-                </button>
-              );
-            })}
-          </nav>
-
-          <div className="workspace-nav-spacer" />
-          <div className="workspace-model-section">
-            <div className="workspace-nav-label">当前模型</div>
             <button
-              ref={railModelBtnRef}
-              type="button"
-              className="workspace-model-button"
-              onClick={() => showModelDropdown
-                ? setShowModelDropdown(false)
-                : (refreshModels(), openDropdown(railModelBtnRef.current, "model"))}
-              title={`切换模型：${modelName}`}
+              className={`mode-rail-item ${workspaceView === "tool" ? "active" : ""}`}
+              onClick={() => setWorkspaceView("tool")}
+              title="物流工具"
             >
-              <span className="workspace-model-icon">
-                <Bot className="workspace-model-symbol" size={17} />
-              </span>
-              <span className="workspace-model-copy">
-                <strong>{modelName}</strong>
-                <small>{currentModel?.provider || "等待连接"} · {thinkingLevel === "off" ? "快速" : "思考"}</small>
-              </span>
-              <ChevronDown size={15} />
+              <Wrench size={19} />
+              <span>工具</span>
             </button>
-            <div className="workspace-health">
-              <span className={ready ? "online" : "offline"} title={ready ? "Pi 在线" : "Pi 离线"}>
-                {ready ? <CheckCircle2 size={12} /> : <CircleOff size={12} />}
-                Pi {ready ? "在线" : "离线"}
-              </span>
-              <span className={toolsList.length > 0 ? "online" : "offline"} title={toolsList.length > 0 ? "Sidecar 在线" : "Sidecar 离线"}>
-                {toolsList.length > 0 ? <CheckCircle2 size={12} /> : <CircleOff size={12} />}
-                工具 {toolsList.length > 0 ? "在线" : "离线"}
-              </span>
-              <button
-                className="workspace-settings-button"
-                onClick={() => { refreshEnvKeys(); loadSystemPrompt(systemPromptPath); loadModelsConfig(); setShowSettings(true); }}
-                title="设置"
-              ><Settings size={15} /></button>
-            </div>
-          </div>
+          </nav>
         </aside>
 
-        <aside className="context-sidebar" aria-label="文件管理">
+        {workspaceView === "assistant" && <aside className="context-sidebar" aria-label="文件管理">
           <header className="context-sidebar-header">
             <div>
               <strong>工作文件</strong>
@@ -1459,7 +1369,7 @@ export default function App() {
               </div>
             )}
           </div>
-        </aside>
+        </aside>}
 
         {/* 左侧栏 */}
         {false && (
@@ -1885,10 +1795,12 @@ export default function App() {
             <ToolsPanel
               ref={toolsPanelRef}
               onSendToAssistant={(message) => { setWorkspaceView("assistant"); setContextPanelTab("files"); send(message); }}
+              onClose={() => setWorkspaceView("assistant")}
               onToolOutput={addToolOutput}
               onToolsChange={setToolsList}
               onActiveToolChange={setActiveToolMirrored}
-              hideNav
+              recentFiles={recentFiles}
+              recentOutputs={toolOutputs}
             />
           </section>
         </main>

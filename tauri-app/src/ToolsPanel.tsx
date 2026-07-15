@@ -1,24 +1,36 @@
-// 工具区面板：用 Tauri 原生文件对话框选文件 → 调 FastAPI → 用原生对话框保存结果。
-//
-// 用 Tauri dialog 而非 HTML <input>/<a download>：
-//   - HTML 拖拽在 Tauri webview 里 DataTransfer.files 经常为空
-//   - <a download> 对 blob URL 在 webview 里经常无反应
-//   - 原生对话框更可靠，且能拿到绝对路径，便于 AI 后续引用
-//
-// 后端：python-sidecar/main.py（FastAPI on 127.0.0.1:8000）
-
-import { forwardRef, useCallback, useEffect, useMemo, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
+import {
+  AlertCircle,
+  BarChart3,
+  CheckCircle2,
+  ChevronRight,
+  Clock3,
+  FileOutput,
+  FileSearch,
+  FileSpreadsheet,
+  FolderOpen,
+  Hash,
+  LoaderCircle,
+  PackageCheck,
+  Play,
+  RotateCcw,
+  Search,
+  Sparkles,
+  Upload,
+  Wrench,
+  X,
+} from "lucide-react";
 
 export interface ToolDef {
   id: string;
   name: string;
   description: string;
   endpoint: string;
-  input: "excel" | "pdf";
+  input: "excel" | "pdf" | "text";
   output: "zip" | "excel" | "json";
 }
 
@@ -29,35 +41,31 @@ interface SidecarStatus {
   error?: string;
 }
 
-interface ToolsPanelProps {
-  onSendToAssistant?: (message: string) => void;
-  /** 工具执行成功并保存输出文件后回调，路径交给 App 加入"工具输出"上下文 */
-  onToolOutput?: (path: string, toolName: string) => void;
-  /** 工具列表变化时上报，供 App 在左侧栏渲染导航 */
-  onToolsChange?: (tools: ToolDef[]) => void;
-  /** 当前选中工具变化时上报，供 App 高亮左侧栏导航 */
-  onActiveToolChange?: (tool: ToolDef | null) => void;
-  /** 隐藏内置工具导航（导航移到左侧栏时设 true，中间只留执行区） */
-  hideNav?: boolean;
+interface RecentOutput {
+  path: string;
+  toolName: string;
+  time: number;
 }
 
-/**
- * ToolsPanel 对外暴露的命令式 API（通过 ref 调用）。
- * 用 useImperativeHandle 而非 props 传 state，避免：
- *   - state 同步时序问题（连续点击会被覆盖）
- *   - useEffect 依赖 tools 未加载时匹配失败
- *   - filePath 设置后清除按钮和 incomingFile 状态冲突
- * 每次 loadFile 调用都是独立命令，直接操作内部 state，可靠且可重复。
- */
+interface ToolsPanelProps {
+  onSendToAssistant?: (message: string) => void;
+  onClose?: () => void;
+  onToolOutput?: (path: string, toolName: string) => void;
+  onToolsChange?: (tools: ToolDef[]) => void;
+  onActiveToolChange?: (tool: ToolDef | null) => void;
+  recentFiles?: string[];
+  recentOutputs?: RecentOutput[];
+}
+
 export interface ToolsPanelHandle {
-  /** 加载文件到工具区，按 toolKind 切换工具并填入 filePath */
   loadFile: (path: string, toolKind: "invoice" | "customs" | "customs-extract" | "data") => void;
-  /** 按 id 切换当前工具（供左侧栏导航点击调用），清空文件与结果 */
   selectTool: (id: string) => void;
 }
 
-const INPUT_FILTERS: Record<ToolDef["input"], { name: string; extensions: string[] }[]> = {
-  excel: [{ name: "Excel", extensions: ["xlsx", "xls"] }],
+type FileInput = Exclude<ToolDef["input"], "text">;
+
+const INPUT_FILTERS: Record<FileInput, { name: string; extensions: string[] }[]> = {
+  excel: [{ name: "Excel / CSV", extensions: ["xlsx", "xls", "csv"] }],
   pdf: [{ name: "PDF", extensions: ["pdf"] }],
 };
 
@@ -73,52 +81,113 @@ const OUTPUT_DEFAULT_NAME: Record<ToolDef["output"], string> = {
   json: "result.json",
 };
 
-const DAILY_TOOL_IDS = new Set(["invoice-packing", "data-analysis"]);
+const TOOL_ORDER = ["invoice-packing", "data-analysis", "hs-code", "customs-generator", "customs-extractor"];
 
 function workflowLabel(tool: ToolDef): string {
   if (tool.id === "invoice-packing") return "单据制作";
   if (tool.id === "data-analysis") return "数据分析";
-  return "物流工具";
+  if (tool.id === "hs-code") return "资料查询";
+  return "报关处理";
 }
 
-export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function ToolsPanel({ onSendToAssistant, onToolOutput, onToolsChange, onActiveToolChange, hideNav = false }, ref) {
+function inputLabel(input: ToolDef["input"]): string {
+  if (input === "text") return "关键词";
+  if (input === "pdf") return "PDF";
+  return "Excel / CSV";
+}
+
+function outputLabel(output: ToolDef["output"]): string {
+  if (output === "zip") return "ZIP 文件";
+  if (output === "excel") return "Excel 文件";
+  return "结构化结果";
+}
+
+function buildQueryUrl(baseUrl: string, endpoint: string, query: string): string {
+  const encoded = encodeURIComponent(query.trim());
+  if (endpoint.endsWith("=")) return `${baseUrl}${endpoint}${encoded}`;
+  const separator = endpoint.includes("?") ? "&" : "?";
+  return `${baseUrl}${endpoint}${separator}q=${encoded}`;
+}
+
+function ToolGlyph({ id, size = 18 }: { id: string; size?: number }) {
+  if (id === "invoice-packing") return <PackageCheck size={size} />;
+  if (id === "data-analysis") return <BarChart3 size={size} />;
+  if (id === "hs-code") return <Hash size={size} />;
+  if (id === "customs-generator") return <FileSpreadsheet size={size} />;
+  if (id === "customs-extractor") return <FileSearch size={size} />;
+  return <Wrench size={size} />;
+}
+
+export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function ToolsPanel({
+  onSendToAssistant,
+  onClose,
+  onToolOutput,
+  onToolsChange,
+  onActiveToolChange,
+  recentFiles = [],
+  recentOutputs = [],
+}, ref) {
   const [tools, setTools] = useState<ToolDef[]>([]);
   const [sidecarUrl, setSidecarUrl] = useState("http://127.0.0.1:8000");
   const [sidecarReady, setSidecarReady] = useState(false);
   const [sidecarError, setSidecarError] = useState<string | null>(null);
-
   const [activeTool, setActiveTool] = useState<ToolDef | null>(null);
-  // filePath 用 Tauri dialog 拿到的绝对路径；fileBlob 是对应的 File 对象用于 multipart 上传
   const [filePath, setFilePath] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const [running, setRunning] = useState(false);
   const [savedPath, setSavedPath] = useState<string | null>(null);
   const [jsonResult, setJsonResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // 「让助手解读」去重：同一工具+同一输入+同一结果 10 秒内只发一次
   const lastReviewRef = useRef<{ key: string; time: number }>({ key: "", time: 0 });
 
-  const visibleTools = useMemo(() => tools, [tools]);
+  const visibleTools = useMemo(() => [...tools].sort((a, b) => {
+    const ai = TOOL_ORDER.indexOf(a.id);
+    const bi = TOOL_ORDER.indexOf(b.id);
+    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+  }), [tools]);
+
+  const parsedResult = useMemo<Record<string, any> | null>(() => {
+    if (!jsonResult) return null;
+    try { return JSON.parse(jsonResult) as Record<string, any>; }
+    catch { return null; }
+  }, [jsonResult]);
+
+  const compatibleRecentFiles = useMemo(() => {
+    if (!activeTool || activeTool.input === "text") return [];
+    const allowed = new Set(INPUT_FILTERS[activeTool.input].flatMap((filter) => filter.extensions));
+    return recentFiles.filter((path) => allowed.has(path.split(".").pop()?.toLowerCase() || "")).slice(0, 4);
+  }, [activeTool, recentFiles]);
+
+  const hasInput = activeTool?.input === "text" ? query.trim().length > 0 : Boolean(filePath);
+  const hasResult = Boolean(savedPath || jsonResult);
+
+  const clearExecution = useCallback((clearInput = true) => {
+    if (clearInput) {
+      setFilePath(null);
+      setQuery("");
+    }
+    setSavedPath(null);
+    setJsonResult(null);
+    setError(null);
+  }, []);
+
+  const selectActiveTool = useCallback((tool: ToolDef) => {
+    setActiveTool(tool);
+    clearExecution(true);
+  }, [clearExecution]);
 
   const askAssistantToReview = useCallback(() => {
     if (!activeTool || !onSendToAssistant) return;
-    // 去重：同一工具+同一输入文件+同一结果的解读请求，10 秒内只发一次
-    const reviewKey = `${activeTool.id}:${filePath || ""}:${savedPath || jsonResult?.slice(0, 100) || ""}`;
+    const inputValue = activeTool.input === "text" ? query.trim() : filePath || "";
+    const reviewKey = `${activeTool.id}:${inputValue}:${savedPath || jsonResult?.slice(0, 100) || ""}`;
     const now = Date.now();
-    const last = lastReviewRef.current;
-    if (last.key === reviewKey && now - last.time < 10000) {
-      return; // 10 秒内重复请求，忽略
-    }
+    if (lastReviewRef.current.key === reviewKey && now - lastReviewRef.current.time < 10000) return;
     lastReviewRef.current = { key: reviewKey, time: now };
-    const inputLine = filePath ? `输入文件：${filePath}` : "没有记录输入文件。";
-    const resultLine = savedPath
-      ? `输出文件：${savedPath}`
-      : `工具返回 JSON：\n${(jsonResult || "").slice(0, 12000)}`;
-    onSendToAssistant(
-      `我刚用「${activeTool.name}」执行了物流工具。\n${inputLine}\n${resultLine}\n请帮我检查结果、指出潜在风险，并给出下一步建议。`
-    );
-  }, [activeTool, filePath, jsonResult, onSendToAssistant, savedPath]);
+    const inputLine = activeTool.input === "text" ? `查询条件：${query.trim()}` : `输入文件：${filePath || "未记录"}`;
+    const resultLine = savedPath ? `输出文件：${savedPath}` : `工具返回结果：\n${(jsonResult || "").slice(0, 12000)}`;
+    onSendToAssistant(`我刚用「${activeTool.name}」执行了物流工具。\n${inputLine}\n${resultLine}\n请检查结果、指出风险，并给出下一步建议。`);
+  }, [activeTool, filePath, jsonResult, onSendToAssistant, query, savedPath]);
 
-  // ============ 加载工具列表 + 监听 sidecar 状态 ============
   const refreshTools = useCallback(async () => {
     if (!sidecarReady) return;
     try {
@@ -127,304 +196,370 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
       const data = await resp.json();
       const nextTools = (data.tools || []) as ToolDef[];
       setTools(nextTools);
-      const preferred = nextTools.find((t) => DAILY_TOOL_IDS.has(t.id)) || nextTools[0];
-      if (!activeTool && preferred) setActiveTool(preferred);
+      setActiveTool((current) => current || nextTools.find((tool) => tool.id === "invoice-packing") || nextTools[0] || null);
+      setError(null);
     } catch (e) {
       setError(`拉取工具列表失败：${e}`);
     }
-  }, [sidecarUrl, sidecarReady, activeTool]);
+  }, [sidecarReady, sidecarUrl]);
 
   const checkStatus = useCallback(async () => {
     try {
-      const st = await invoke<SidecarStatus>("sidecar_status");
-      setSidecarReady(st.ready);
-      if (st.url) setSidecarUrl(st.url);
-    } catch (e) {
-      setSidecarError(String(e));
+      const status = await invoke<SidecarStatus>("sidecar_status");
+      setSidecarReady(status.ready);
+      if (status.url) setSidecarUrl(status.url);
+      setSidecarError(status.error || null);
+    } catch (invokeError) {
+      // 普通浏览器预览没有 Tauri invoke，开发时直接探测本地 sidecar。
+      try {
+        const resp = await fetch(`${sidecarUrl}/api/health`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        setSidecarReady(true);
+        setSidecarError(null);
+      } catch {
+        setSidecarReady(false);
+        setSidecarError(String(invokeError));
+      }
     }
-  }, []);
+  }, [sidecarUrl]);
 
   useEffect(() => {
     checkStatus();
     let unlisten: UnlistenFn | undefined;
     (async () => {
-      unlisten = await listen<SidecarStatus>("sidecar-status", (e) => {
-        setSidecarReady(e.payload.ready);
-        if (e.payload.url) setSidecarUrl(e.payload.url);
-        if (e.payload.error) setSidecarError(e.payload.error);
-        else setSidecarError(null);
-      });
+      try {
+        unlisten = await listen<SidecarStatus>("sidecar-status", (event) => {
+          setSidecarReady(event.payload.ready);
+          if (event.payload.url) setSidecarUrl(event.payload.url);
+          setSidecarError(event.payload.error || null);
+        });
+      } catch {
+        // Browser preview has no Tauri event bridge.
+      }
     })();
     return () => { unlisten?.(); };
   }, [checkStatus]);
 
   useEffect(() => { refreshTools(); }, [refreshTools]);
 
-  // ============ 命令式 API：供外部 ref 调用 ============
-  // loadFile(path, toolKind)：按 toolKind 找工具 → 切换 activeTool → 填入 filePath
-  // selectTool(id)：按 id 切换 activeTool（供左侧栏导航点击调用），清空文件与结果
-  // 每次调用都是独立命令，直接操作 state，无 useEffect 副作用链。
   useImperativeHandle(ref, () => ({
-    loadFile: (path: string, toolKind: "invoice" | "customs" | "customs-extract" | "data") => {
-      const p = path.trim();
-      if (!p) return;
-      // 按 toolKind 找对应工具
+    loadFile: (path, toolKind) => {
+      const normalized = path.trim();
+      if (!normalized) return;
       const targetId = toolKind === "invoice"
         ? "invoice-packing"
         : toolKind === "customs"
-        ? "customs-generator"
-        : toolKind === "customs-extract"
-        ? "customs-extractor"
-        : "data-analysis";
-      const matched = tools.find((t) => t.id === targetId) || null;
-      if (matched) {
-        setActiveTool(matched);
-      } else {
-        // 工具列表还没加载，按扩展名兜底匹配
-        const ext = p.split(".").pop()?.toLowerCase() || "";
-        const fallback = (ext === "xlsx" || ext === "xls")
-          ? (tools.find((t) => t.id === "invoice-packing") || tools.find((t) => t.id === "data-analysis") || tools[0] || null)
-          : (tools.find((t) => t.input === "pdf") || tools[0] || null);
-        if (fallback) setActiveTool(fallback);
-      }
-      setFilePath(p);
-      setSavedPath(null);
-      setJsonResult(null);
-      setError(null);
+          ? "customs-generator"
+          : toolKind === "customs-extract"
+            ? "customs-extractor"
+            : "data-analysis";
+      const matched = tools.find((tool) => tool.id === targetId)
+        || tools.find((tool) => tool.input !== "text")
+        || null;
+      if (matched) setActiveTool(matched);
+      setFilePath(normalized);
+      setQuery("");
+      clearExecution(false);
     },
-    selectTool: (id: string) => {
-      const matched = tools.find((t) => t.id === id) || null;
-      if (!matched) return;
-      setActiveTool(matched);
-      setFilePath(null);
-      setSavedPath(null);
-      setJsonResult(null);
-      setError(null);
+    selectTool: (id) => {
+      const matched = tools.find((tool) => tool.id === id);
+      if (matched) selectActiveTool(matched);
     },
-  }), [tools]);
+  }), [clearExecution, selectActiveTool, tools]);
 
-  // 工具列表 / 选中工具变化时上报，供 App 在左侧栏渲染导航
-  useEffect(() => { onToolsChange?.(tools); }, [tools, onToolsChange]);
+  useEffect(() => { onToolsChange?.(tools); }, [onToolsChange, tools]);
   useEffect(() => { onActiveToolChange?.(activeTool); }, [activeTool, onActiveToolChange]);
 
-  // ============ 选文件（Tauri 原生对话框）============
   const pickFile = useCallback(async () => {
-    if (!activeTool) return;
-    setError(null);
-    setSavedPath(null);
-    setJsonResult(null);
+    if (!activeTool || activeTool.input === "text") return;
+    clearExecution(false);
     try {
-      const selected = await openDialog({
-        multiple: false,
-        filters: INPUT_FILTERS[activeTool.input],
-      });
-      if (typeof selected === "string" && selected) {
-        setFilePath(selected);
-      }
+      const selected = await openDialog({ multiple: false, filters: INPUT_FILTERS[activeTool.input] });
+      if (typeof selected === "string" && selected) setFilePath(selected);
     } catch (e) {
       setError(`选文件失败：${e}`);
     }
-  }, [activeTool]);
+  }, [activeTool, clearExecution]);
 
-  // ============ 调用工具 ============
   const runTool = useCallback(async () => {
-    if (!activeTool || !filePath || !sidecarReady) return;
+    if (!activeTool || !hasInput || !sidecarReady) return;
     setRunning(true);
     setError(null);
     setSavedPath(null);
     setJsonResult(null);
     try {
-      // 用 Tauri fs 插件读本地文件为字节数组，再包成 Blob 上传。
-      // 不能用 fetch('file://...')：Tauri webview 默认禁止 file:// 协议（报 Failed to fetch）。
-      let fileBlob: Blob;
-      try {
-        const bytes = await readFile(filePath);
-        fileBlob = new Blob([bytes]);
-      } catch (e) {
-        throw new Error(`无法读取文件 ${filePath}：${e}。请确认路径正确。`);
+      if (activeTool.input === "text") {
+        const resp = await fetch(buildQueryUrl(sidecarUrl, activeTool.endpoint, query));
+        if (!resp.ok) {
+          const body = await resp.json().catch(() => null);
+          throw new Error(body?.detail || `HTTP ${resp.status}`);
+        }
+        setJsonResult(JSON.stringify(await resp.json(), null, 2));
+        return;
       }
 
-      const fd = new FormData();
-      // FormData.append 需要 File 而非 Blob，用 File 构造器包一层带文件名
-      const fileName = filePath.split(/[\\/]/).pop() || "upload";
-      fd.append("file", new File([fileBlob], fileName), fileName);
+      const activeFilePath = filePath as string;
+      let fileBlob: Blob;
+      try {
+        const bytes = await readFile(activeFilePath);
+        fileBlob = new Blob([bytes]);
+      } catch (e) {
+        throw new Error(`无法读取文件 ${activeFilePath}：${e}。请确认路径正确。`);
+      }
 
-      const resp = await fetch(`${sidecarUrl}${activeTool.endpoint}`, {
-        method: "POST",
-        body: fd,
-      });
+      const fileName = activeFilePath.split(/[\\/]/).pop() || "upload";
+      const formData = new FormData();
+      formData.append("file", new File([fileBlob], fileName), fileName);
+      const resp = await fetch(`${sidecarUrl}${activeTool.endpoint}`, { method: "POST", body: formData });
       if (!resp.ok) {
-        let msg = `HTTP ${resp.status}`;
-        try {
-          const errBody = await resp.json();
-          if (errBody.detail) msg = errBody.detail;
-        } catch {}
-        throw new Error(msg);
+        const body = await resp.json().catch(() => null);
+        throw new Error(body?.detail || `HTTP ${resp.status}`);
       }
 
       if (activeTool.output === "json") {
-        // JSON 类型：直接展示，不弹保存对话框
-        const data = await resp.json();
-        setJsonResult(JSON.stringify(data, null, 2));
+        setJsonResult(JSON.stringify(await resp.json(), null, 2));
       } else {
-        // 文件类型：弹保存对话框 → 写盘
         const resultBlob = await resp.blob();
-        const defaultName = `${activeTool.id}-${new Date().toISOString().slice(0, 10)}.${OUTPUT_DEFAULT_NAME[activeTool.output].split(".")[1]}`;
-        const savePath = await saveDialog({
-          defaultPath: defaultName,
-          filters: OUTPUT_FILTERS[activeTool.output],
-        });
+        const extension = OUTPUT_DEFAULT_NAME[activeTool.output].split(".")[1];
+        const defaultName = `${activeTool.id}-${new Date().toISOString().slice(0, 10)}.${extension}`;
+        const savePath = await saveDialog({ defaultPath: defaultName, filters: OUTPUT_FILTERS[activeTool.output] });
         if (!savePath) {
-          setError("已取消保存。请重新执行工具并选择保存位置。");
+          setError("已取消保存。结果尚未写入本地文件。");
           return;
         }
-        // 用 Tauri 写文件：通过 invoke 调 Rust 命令 write_binary_file
-        const buf = new Uint8Array(await resultBlob.arrayBuffer());
-        await invoke("write_binary_file", { path: savePath, data: Array.from(buf) });
+        const buffer = new Uint8Array(await resultBlob.arrayBuffer());
+        await invoke("write_binary_file", { path: savePath, data: Array.from(buffer) });
         setSavedPath(savePath);
-        // 通知 App 加入"工具输出"上下文区
-        if (onToolOutput) onToolOutput(savePath, activeTool?.name || "物流工具");
+        onToolOutput?.(savePath, activeTool.name);
       }
     } catch (e) {
       setError(`工具执行失败：${e}`);
     } finally {
       setRunning(false);
     }
-  }, [activeTool, filePath, sidecarUrl, sidecarReady]);
+  }, [activeTool, filePath, hasInput, onToolOutput, query, sidecarReady, sidecarUrl]);
+
+  const hsResults = activeTool?.id === "hs-code" && Array.isArray(parsedResult?.results) ? parsedResult.results : null;
+  const analysisColumns = activeTool?.id === "data-analysis" && Array.isArray(parsedResult?.columns) ? parsedResult.columns : null;
+  const missingColumnCount = analysisColumns?.filter((column: any) => Number(column.missing) > 0).length || 0;
 
   return (
-    <div className="tools-panel">
-      {sidecarError && (
-        <div className="tools-banner error">{sidecarError}</div>
-      )}
+    <div className="tools-panel tool-page">
+      <header className="tools-page-header">
+        <div>
+          <span className="tools-page-eyebrow">BUSINESS AUTOMATION</span>
+          <h1>物流工具</h1>
+          <p>选择工具并提供输入，执行结果可以继续交给 AI 助手检查。</p>
+        </div>
+        <div className="tools-page-actions">
+          <div className={`sidecar-status ${sidecarReady ? "ready" : "error"}`}>
+            {sidecarReady ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+            {sidecarReady ? "工具服务在线" : "工具服务离线"}
+          </div>
+          {onClose && (
+            <button className="tools-close-button" onClick={onClose} title="返回 AI 助手" aria-label="返回 AI 助手">
+              <X size={18} />
+            </button>
+          )}
+        </div>
+      </header>
+
+      {sidecarError && !sidecarReady && <div className="tools-banner error">Sidecar 未连接：{sidecarError}</div>}
 
       <div className="tools-body">
-        {/* 内置导航：hideNav=true 时由左侧栏承载导航，中间只留执行区 */}
-        {!hideNav && (
-          <div className="tools-list">
-            <div className="tools-list-title">日常流程</div>
+        <aside className="tools-list" aria-label="可用工具">
+          <div className="tools-list-title">全部工具</div>
+          <div className="tools-list-scroll">
             {visibleTools.length === 0 ? (
               <div className="tools-empty">
-                {sidecarReady ? "未拉到工具列表" : "等待 sidecar 就绪…"}
+                {sidecarReady ? "没有获取到工具" : "正在等待工具服务…"}
               </div>
-            ) : visibleTools.map((t) => (
+            ) : visibleTools.map((tool) => (
               <button
-                key={t.id}
-                className={`tool-card ${activeTool?.id === t.id ? "active" : ""}`}
-                onClick={() => { setActiveTool(t); setFilePath(null); setSavedPath(null); setJsonResult(null); setError(null); }}
+                key={tool.id}
+                className={`tool-card ${activeTool?.id === tool.id ? "active" : ""}`}
+                onClick={() => selectActiveTool(tool)}
               >
-                <div className="tool-card-name">{t.name}</div>
-                <div className="tool-card-desc">{t.description}</div>
-                <div className="tool-card-meta">
-                  <span>{workflowLabel(t)}</span>
-                  <span>·</span>
-                  <span>{t.input.toUpperCase()}</span>
-                  <span>→</span>
-                  <span>{t.output.toUpperCase()}</span>
-                </div>
+                <span className="tool-card-icon"><ToolGlyph id={tool.id} /></span>
+                <span className="tool-card-copy">
+                  <strong>{tool.name}</strong>
+                  <small>{workflowLabel(tool)} · {inputLabel(tool.input)} → {outputLabel(tool.output)}</small>
+                </span>
+                <ChevronRight size={15} />
               </button>
             ))}
           </div>
-        )}
 
-        <div className="tools-detail">
-          {/* 顶行：左侧工具名（发票/箱单生成），右侧"工具执行区"标签 + Sidecar 状态
-              原 .tools-header 独立行已合并到这里，省出的纵向空间还给上方聊天输出窗口 */}
-          <div className="tool-detail-top">
-            <div className="tool-detail-title">{activeTool ? activeTool.name : "工具执行区"}</div>
-            <div className="tool-detail-status">
-              <span className="tools-title-tag">工具执行区</span>
-              <div className={`sidecar-status ${sidecarReady ? "ready" : "error"}`}>
-                <span className="dot" />
-                {sidecarReady ? "Sidecar 在线" : sidecarError ? "Sidecar 异常" : "Sidecar 启动中…"}
-              </div>
-            </div>
+          <div className="tools-recent-output">
+            <div className="tools-list-title">最近输出</div>
+            {recentOutputs.length === 0 ? (
+              <span className="tools-recent-empty">执行结果会保留在这里</span>
+            ) : recentOutputs.slice(0, 3).map((output) => (
+              <button key={`${output.path}-${output.time}`} onClick={() => invoke("open_file", { path: output.path })} title={output.path}>
+                <FileOutput size={14} />
+                <span>
+                  <strong>{output.path.split(/[\\/]/).pop()}</strong>
+                  <small>{output.toolName} · {new Date(output.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small>
+                </span>
+              </button>
+            ))}
           </div>
+        </aside>
+
+        <section className="tools-detail">
           {activeTool ? (
             <>
-              <div className="tool-detail-desc">{activeTool.description}</div>
-
-              {/* 选文件区（点击弹原生对话框）*/}
-              <div className="file-pick-zone" onClick={pickFile}>
-                {filePath ? (
-                  <div className="file-pick-info">
-                    <div className="file-pick-icon fb-icon-badge excel">XLS</div>
-                    <div className="file-pick-name">{filePath.split(/[\\/]/).pop()}</div>
-                    <div className="file-pick-path">{filePath}</div>
-                    <div className="file-pick-hint">点击重新选择</div>
+              <div className="tool-detail-top">
+                <div className="tool-detail-heading">
+                  <span className="tool-detail-icon"><ToolGlyph id={activeTool.id} size={20} /></span>
+                  <div>
+                    <h2>{activeTool.name}</h2>
+                    <p>{activeTool.description}</p>
                   </div>
+                </div>
+                <div className="tool-detail-meta">
+                  <span>{inputLabel(activeTool.input)}</span>
+                  <span>{outputLabel(activeTool.output)}</span>
+                </div>
+              </div>
+
+              <div className="tool-workflow" aria-label="执行步骤">
+                <div className="done"><span>1</span><div><strong>选择工具</strong><small>{activeTool.name}</small></div></div>
+                <div className={hasInput ? "done" : "current"}><span>2</span><div><strong>提供输入</strong><small>{activeTool.input === "text" ? "输入编码或品名" : "选择本地文件"}</small></div></div>
+                <div className={hasResult ? "done" : hasInput ? "current" : ""}><span>3</span><div><strong>执行与结果</strong><small>{hasResult ? "已生成结果" : "检查后执行"}</small></div></div>
+              </div>
+
+              <div className="tool-input-section">
+                <div className="tool-section-heading">
+                  <div><strong>{activeTool.input === "text" ? "查询条件" : "输入文件"}</strong><small>{activeTool.input === "text" ? "支持 HS 编码或中文品名" : `支持 ${inputLabel(activeTool.input)}`}</small></div>
+                  {(filePath || query) && (
+                    <button className="tool-reset-button" onClick={() => clearExecution(true)} title="清除输入">
+                      <RotateCcw size={14} />清除
+                    </button>
+                  )}
+                </div>
+
+                {activeTool.input === "text" ? (
+                  <>
+                    <form className="tool-query-form" onSubmit={(event) => { event.preventDefault(); runTool(); }}>
+                      <Search size={18} />
+                      <input value={query} onChange={(event) => { setQuery(event.target.value); clearExecution(false); }} placeholder="例如：6109100021、棉制T恤、锂离子电池" autoFocus />
+                      <button type="submit" className="btn-primary" disabled={!hasInput || running || !sidecarReady}>
+                        {running ? <LoaderCircle className="spin" size={16} /> : <Search size={16} />}
+                        {running ? "查询中" : "查询"}
+                      </button>
+                    </form>
+                    <div className="tool-query-examples">
+                      <span>快速示例</span>
+                      {["棉制T恤", "6109100021", "锂离子电池"].map((value) => (
+                        <button key={value} onClick={() => { setQuery(value); clearExecution(false); }}>{value}</button>
+                      ))}
+                    </div>
+                  </>
                 ) : (
-                  <div className="file-pick-empty">
-                    <div className="file-pick-icon fb-icon-badge dir">DIR</div>
-                    <div>点击选择 {activeTool.input.toUpperCase()} 文件</div>
-                    <div className="file-pick-accept">
-                      支持：{INPUT_FILTERS[activeTool.input].map(f => f.extensions.join(", ")).join(", ")}
+                  <>
+                    <button className={`file-pick-zone ${filePath ? "has-file" : ""}`} onClick={pickFile}>
+                      {filePath ? (
+                        <>
+                          <span className="file-pick-icon"><FileSpreadsheet size={21} /></span>
+                          <span className="file-pick-copy"><strong>{filePath.split(/[\\/]/).pop()}</strong><small>{filePath}</small></span>
+                          <span className="file-pick-change">重新选择</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="file-pick-icon"><Upload size={21} /></span>
+                          <span className="file-pick-copy"><strong>选择 {inputLabel(activeTool.input)} 文件</strong><small>点击打开本地文件选择器</small></span>
+                        </>
+                      )}
+                    </button>
+                    {compatibleRecentFiles.length > 0 && (
+                      <div className="tool-recent-files">
+                        <span><Clock3 size={13} />最近使用</span>
+                        <div>{compatibleRecentFiles.map((path) => (
+                          <button key={path} onClick={() => { setFilePath(path); clearExecution(false); }} title={path}>{path.split(/[\\/]/).pop()}</button>
+                        ))}</div>
+                      </div>
+                    )}
+                    <div className="tool-actions">
+                      <button className="btn-primary" onClick={runTool} disabled={!hasInput || running || !sidecarReady}>
+                        {running ? <LoaderCircle className="spin" size={16} /> : <Play size={16} />}
+                        {running ? "执行中" : "执行工具"}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="tool-result-section">
+                <div className="tool-section-heading">
+                  <div><strong>执行结果</strong><small>{running ? "工具正在处理" : hasResult ? "结果已就绪" : "执行后在这里查看结果"}</small></div>
+                  {hasResult && onSendToAssistant && (
+                    <button className="tool-ai-button" onClick={askAssistantToReview}><Sparkles size={14} />让 AI 检查</button>
+                  )}
+                </div>
+
+                {running && <div className="tool-result-placeholder"><LoaderCircle className="spin" size={22} /><span>正在处理，请稍候…</span></div>}
+                {!running && error && <div className="tool-error"><AlertCircle size={18} /><div><strong>执行失败</strong><pre>{error}</pre></div></div>}
+                {!running && !error && !hasResult && <div className="tool-result-placeholder"><FileOutput size={22} /><span>还没有执行结果</span></div>}
+
+                {!running && savedPath && (
+                  <div className="tool-file-result">
+                    <CheckCircle2 size={22} />
+                    <div><strong>文件已保存</strong><small>{savedPath}</small></div>
+                    <button className="btn-secondary" onClick={() => invoke("open_in_explorer", { path: savedPath })}><FolderOpen size={15} />打开位置</button>
+                  </div>
+                )}
+
+                {!running && hsResults && (
+                  hsResults.length === 0 ? (
+                    <div className="tool-result-placeholder"><Search size={22} /><span>没有找到匹配编码，请尝试更短的编码或品名关键词。</span></div>
+                  ) : (
+                    <div className="hs-result-list">
+                      <div className="hs-result-summary">找到 {hsResults.length} 条匹配结果</div>
+                      {hsResults.map((item: any) => (
+                        <div className="hs-result-row" key={`${item.code}-${item.name}`}>
+                          <span className="hs-code-value">{item.code}</span>
+                          <span className="hs-name"><strong>{item.name}</strong><small>{item.category}</small></span>
+                          <span><small>税率</small><strong>{item.tax_rate || "-"}</strong></span>
+                          <span><small>退税率</small><strong>{item.export_rebate || "-"}</strong></span>
+                          <span><small>单位</small><strong>{item.unit || "-"}</strong></span>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                )}
+
+                {!running && analysisColumns && parsedResult && (
+                  <div className="analysis-result">
+                    <div className="analysis-summary">{parsedResult.summary}</div>
+                    <div className="analysis-metrics">
+                      <div><strong>{parsedResult.shape?.[0] ?? 0}</strong><small>数据行</small></div>
+                      <div><strong>{parsedResult.shape?.[1] ?? analysisColumns.length}</strong><small>字段数</small></div>
+                      <div><strong>{missingColumnCount}</strong><small>含缺失值字段</small></div>
+                      <div><strong>{parsedResult.correlations?.length || 0}</strong><small>显著相关关系</small></div>
+                    </div>
+                    <div className="analysis-column-list">
+                      {analysisColumns.slice(0, 10).map((column: any) => (
+                        <div key={column.name}>
+                          <span><strong>{column.name}</strong><small>{column.kind} · {column.dtype}</small></span>
+                          <span>{column.unique} 个唯一值</span>
+                          <span className={column.missing ? "warning" : ""}>{column.missing ? `缺失 ${column.missing_pct}%` : "完整"}</span>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
-              </div>
 
-              {/* 执行按钮 */}
-              <div className="tool-actions">
-                <button
-                  className="btn-primary"
-                  onClick={runTool}
-                  disabled={!filePath || running || !sidecarReady}
-                >
-                  {running ? "执行中…" : "执行工具"}
-                </button>
-                {filePath && (
-                  <button
-                    className="btn-secondary"
-                    onClick={() => { setFilePath(null); setSavedPath(null); setJsonResult(null); setError(null); }}
-                  >清除</button>
+                {!running && jsonResult && !hsResults && !analysisColumns && <pre className="tool-result-json">{jsonResult}</pre>}
+                {!running && jsonResult && (hsResults || analysisColumns) && (
+                  <details className="tool-raw-result"><summary>查看原始 JSON</summary><pre>{jsonResult}</pre></details>
                 )}
               </div>
-
-              {/* 错误（可展开看完整堆栈）*/}
-              {error && (
-                <div className="tool-error">
-                  <div className="tool-error-title">❌ 错误</div>
-                  <pre className="tool-error-detail">{error}</pre>
-                </div>
-              )}
-
-              {/* 成功结果：文件类型 */}
-              {savedPath && (
-                <div className="tool-result">
-                  <div className="tool-result-label">✓ 完成 — 结果已保存：</div>
-                  <div className="tool-result-path">{savedPath}</div>
-                  <button
-                    className="btn-secondary"
-                    onClick={() => invoke("open_in_explorer", { path: savedPath })}
-                  >在文件夹中显示</button>
-                  {onSendToAssistant && (
-                    <button
-                      className="btn-secondary"
-                      onClick={askAssistantToReview}
-                    >让助手解读</button>
-                  )}
-                </div>
-              )}
-
-              {/* 成功结果：JSON 类型（直接展示） */}
-              {jsonResult && (
-                <div className="tool-result">
-                  <div className="tool-result-label">✓ 完成 — 分析结果：</div>
-                  <pre className="tool-result-json">{jsonResult}</pre>
-                  {onSendToAssistant && (
-                    <button
-                      className="btn-secondary"
-                      onClick={askAssistantToReview}
-                    >让助手解读</button>
-                  )}
-                </div>
-              )}
             </>
           ) : (
             <div className="tools-empty">请从左侧选择一个工具</div>
           )}
-        </div>
+        </section>
       </div>
     </div>
   );
