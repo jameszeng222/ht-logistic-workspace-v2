@@ -4517,3 +4517,72 @@ body {
   .mode-rail-settings,
   .mode-rail-health { width: 62px; }
 }
+
+/* V4.3: compact rail and preserve side panels under display scaling. */
+:root { --mode-rail-w: 70px; }
+
+.mode-rail { padding-right: 5px; padding-left: 5px; }
+.mode-rail-item { width: 58px; }
+.mode-rail-model,
+.mode-rail-settings { width: 42px; grid-template-columns: 24px; padding: 0 9px; }
+.mode-rail-model > span:last-child,
+.mode-rail-settings > span:last-child { display: none; }
+.mode-rail-footer-icon { background: transparent; box-shadow: none; }
+.mode-rail-health { width: 58px; padding-right: 4px; padding-left: 4px; background: transparent; box-shadow: none; }
+
+.assistant-history-list,
+.context-output-list,
+.fb-file-list,
+.tools-list-scroll,
+.tools-detail,
+.messages {
+  scrollbar-width: thin;
+  scrollbar-color: #b7c0bb transparent;
+}
+
+.assistant-history-list::-webkit-scrollbar,
+.context-output-list::-webkit-scrollbar,
+.fb-file-list::-webkit-scrollbar,
+.tools-list-scroll::-webkit-scrollbar,
+.tools-detail::-webkit-scrollbar,
+.messages::-webkit-scrollbar { width: 7px; height: 7px; }
+
+.assistant-history-list::-webkit-scrollbar-thumb,
+.context-output-list::-webkit-scrollbar-thumb,
+.fb-file-list::-webkit-scrollbar-thumb,
+.tools-list-scroll::-webkit-scrollbar-thumb,
+.tools-detail::-webkit-scrollbar-thumb,
+.messages::-webkit-scrollbar-thumb { border-radius: 8px; background: #b7c0bb; }
+
+@media (min-width: 761px) and (max-width: 900px) {
+  :root {
+    --mode-rail-w: 66px;
+    --workspace-side-w: 210px;
+  }
+
+  .body.workspace-mode,
+  .body.workspace-mode:has(.main.main-empty),
+  .body.workspace-mode.tool-view,
+  .body.workspace-mode.tool-view:has(.main.main-empty) {
+    grid-template-columns: var(--mode-rail-w) var(--workspace-side-w) minmax(0, 1fr);
+  }
+
+  .assistant-sidebar,
+  .tool-view .context-sidebar { display: flex; }
+
+  .assistant-view .workspace-main,
+  .tool-view .workspace-main,
+  .tool-view .workspace-main.main-empty { grid-column: 3; }
+
+  .mode-rail-item { width: 56px; }
+  .mode-rail-model,
+  .mode-rail-settings { width: 40px; }
+  .mode-rail-health { width: 56px; }
+
+  .tool-view .tools-body { grid-template-columns: 164px minmax(0, 1fr); }
+  .tool-view .tools-detail { padding-right: 14px; padding-left: 14px; }
+  .tool-detail-meta,
+  .tool-card-copy small,
+  .tools-page-header p { display: none; }
+  .tools-page-header { padding-right: 12px; padding-left: 16px; }
+}
