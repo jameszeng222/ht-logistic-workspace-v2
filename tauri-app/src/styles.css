@@ -3394,6 +3394,45 @@ body {
   letter-spacing: 0;
 }
 
+.assistant-task-files {
+  margin-top: 24px;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfb;
+}
+.assistant-task-files > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.assistant-task-files > header strong { font-size: 11.5px; font-weight: 680; }
+.assistant-task-files > header span { color: var(--fg-subtle); font-size: 9.5px; }
+.assistant-task-files > div { display: flex; flex-wrap: wrap; gap: 7px; }
+.assistant-task-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 250px;
+  height: 30px;
+  padding: 0 5px 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+.assistant-task-file > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.assistant-task-file > button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-subtle);
+  cursor: pointer;
+}
+.assistant-task-file > button:hover { background: var(--surface-hover); color: var(--danger); }
+
 .empty-suggestion-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3684,6 +3723,7 @@ body {
 .assistant-entry small { color: var(--fg-subtle); font-size: 9.5px; }
 .assistant-entry.active strong { color: #175f54; }
 .assistant-project-entry { margin-top: 2px; }
+.assistant-files-entry { margin-top: 2px; }
 
 .assistant-new-chat {
   position: absolute;
@@ -3731,6 +3771,55 @@ body {
   padding: 0 8px 16px;
   overflow-y: auto;
 }
+
+.assistant-files-view {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  padding: 4px 8px 8px;
+}
+
+.assistant-files-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 54px;
+  padding: 7px 8px;
+}
+.assistant-files-header > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.assistant-files-header strong { font-size: 12px; font-weight: 680; }
+.assistant-files-header small { overflow: hidden; color: var(--fg-subtle); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.assistant-files-header button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.assistant-files-header button:hover { background: #ffffff; color: var(--primary); }
+.assistant-files-browser { display: flex; min-height: 0; flex: 1; overflow: hidden; border-radius: 8px; background: #ffffff; }
+.assistant-files-browser .file-browser { width: 100%; background: #ffffff; }
+.assistant-files-browser .fb-toolbar { padding-top: 4px; }
+
+.fb-selection-toggle {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid #c8d1cc;
+  border-radius: 50%;
+  color: #ffffff;
+}
+.fb-selection-toggle.active { border-color: var(--primary); background: var(--primary); }
+.file-browser.selection-mode .fb-entry.file { cursor: pointer; }
+.file-browser.selection-mode .fb-entry.file.selected { border-color: #afd4c9; background: #e7f3ef; }
 
 .assistant-history-empty {
   display: flex;

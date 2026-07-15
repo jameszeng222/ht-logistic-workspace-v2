@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
+import { Check } from "lucide-react";
 
 interface DirEntry {
   name: string;
@@ -113,6 +114,9 @@ interface FileBrowserProps {
   currentCwd?: string;
   compact?: boolean;
   hideTabs?: boolean;
+  selectionMode?: boolean;
+  selectedFiles?: string[];
+  onToggleFile?: (path: string) => void;
   /** 点击"分析"按钮时回调，把文件绝对路径交给聊天框作为附件 */
   onPickFile?: (path: string) => void;
   /** 点击"单据"/"数据"按钮时回调，把文件交给工具区执行对应工具 */
@@ -138,7 +142,18 @@ interface CtxMenuState {
   items: CtxMenuItem[];
 }
 
-export function FileBrowser({ currentCwd, compact = false, hideTabs = false, onPickFile, onRunTool, recentFiles = [], toolOutputs = [] }: FileBrowserProps) {
+export function FileBrowser({
+  currentCwd,
+  compact = false,
+  hideTabs = false,
+  selectionMode = false,
+  selectedFiles = [],
+  onToggleFile,
+  onPickFile,
+  onRunTool,
+  recentFiles = [],
+  toolOutputs = [],
+}: FileBrowserProps) {
   const [tab, setTab] = useState<BrowserTab>("workspace");
   const [agentPaths, setAgentPaths] = useState<AgentPaths | null>(null);
   const [entries, setEntries] = useState<DirEntry[]>([]);
@@ -349,7 +364,7 @@ export function FileBrowser({ currentCwd, compact = false, hideTabs = false, onP
   const breadcrumbs = currentPath ? splitPath(currentPath) : [];
 
   return (
-    <div className={`file-browser ${compact ? "compact" : ""}`}>
+    <div className={`file-browser ${compact ? "compact" : ""} ${selectionMode ? "selection-mode" : ""}`}>
       {/* 上下文区：最近使用 + 工具输出（在文件浏览之上，体现"工作台上下文"）
           仅展示文件名 + 图标；所有动作（分析/单据/数据）走右键菜单，避免按钮拥挤 */}
       {(recentFiles.length > 0 || toolOutputs.length > 0) && (
@@ -492,9 +507,16 @@ export function FileBrowser({ currentCwd, compact = false, hideTabs = false, onP
             {entries.map((entry) => (
               <div
                 key={entry.path}
-                className={`fb-entry ${entry.is_dir ? "dir" : "file"} ${selectedEntry?.path === entry.path ? "selected" : ""}`}
-                onClick={() => handleEntryClick(entry)}
-                onDoubleClick={() => { if (!entry.is_dir && onPickFile) onPickFile(entry.path); }}
+                className={`fb-entry ${entry.is_dir ? "dir" : "file"} ${(selectionMode ? selectedFiles.includes(entry.path) : selectedEntry?.path === entry.path) ? "selected" : ""}`}
+                onClick={() => {
+                  if (entry.is_dir) {
+                    handleEntryClick(entry);
+                    return;
+                  }
+                  setSelectedEntry(entry);
+                  if (selectionMode && onToggleFile) onToggleFile(entry.path);
+                }}
+                onDoubleClick={() => { if (!selectionMode && !entry.is_dir && onPickFile) onPickFile(entry.path); }}
                 onContextMenu={(e) => openCtxMenu(e, buildFileMenuItems(entry))}
                 draggable={!entry.is_dir}
                 onDragStart={(e) => {
@@ -515,20 +537,26 @@ export function FileBrowser({ currentCwd, compact = false, hideTabs = false, onP
                 {!compact && <span className="fb-col-size">{formatSize(entry.size)}</span>}
                 {!compact && <span className="fb-col-modified">{formatDate(entry.modified)}</span>}
                 {/* 行内只保留"打开/定位"两个常用动作；"单据/数据/分析"改右键菜单 */}
-                <span className="fb-col-actions" onClick={(e) => e.stopPropagation()}>
-                  {!entry.is_dir && (
+                {selectionMode && !entry.is_dir ? (
+                  <span className={`fb-selection-toggle ${selectedFiles.includes(entry.path) ? "active" : ""}`} aria-hidden="true">
+                    {selectedFiles.includes(entry.path) && <Check size={13} strokeWidth={2.5} />}
+                  </span>
+                ) : (
+                  <span className="fb-col-actions" onClick={(e) => e.stopPropagation()}>
+                    {!entry.is_dir && (
+                      <button
+                        className="fb-action-btn"
+                        onClick={() => handleOpenFile(entry)}
+                        title="用系统默认程序打开"
+                      >打开</button>
+                    )}
                     <button
                       className="fb-action-btn"
-                      onClick={() => handleOpenFile(entry)}
-                      title="用系统默认程序打开"
-                    >打开</button>
-                  )}
-                  <button
-                    className="fb-action-btn"
-                    onClick={() => handleShowInExplorer(entry)}
-                    title="在文件管理器中显示"
-                  >定位</button>
-                </span>
+                      onClick={() => handleShowInExplorer(entry)}
+                      title="在文件管理器中显示"
+                    >定位</button>
+                  </span>
+                )}
               </div>
             ))}
           </>
@@ -544,7 +572,9 @@ export function FileBrowser({ currentCwd, compact = false, hideTabs = false, onP
         {entries.filter((e) => e.is_dir).length > 0 && (
           <span>· {entries.filter((e) => e.is_dir).length} 个文件夹</span>
         )}
-        {selectedEntry && (
+        {selectionMode && selectedFiles.length > 0 ? (
+          <span className="fb-status-selected">· 已选 {selectedFiles.length} 个文件</span>
+        ) : selectedEntry && (
           <span className="fb-status-selected">· 已选：{selectedEntry.name}</span>
         )}
       </div>

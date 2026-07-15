@@ -140,7 +140,7 @@ export default function App() {
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showPermissionDropdown, setShowPermissionDropdown] = useState(false);
   const [workspaceView, setWorkspaceView] = useState<"assistant" | "tool">("assistant");
-  const [assistantSidebarView, setAssistantSidebarView] = useState<"quick" | "projects">("quick");
+  const [assistantSidebarView, setAssistantSidebarView] = useState<"quick" | "projects" | "files">("quick");
   const [contextPanelTab, setContextPanelTab] = useState<"files" | "outputs">("files");
   // 下拉框定位：用 fixed + Portal 渲染到 body，彻底脱离所有父容器 overflow 裁切
   const modelBtnRef = useRef<HTMLButtonElement>(null);
@@ -1055,6 +1055,32 @@ export default function App() {
     toast(`已加入附件：${fileName}（可直接发送）`, "success");
   }, [toast, addRecentFile]);
 
+  const toggleProjectFile = useCallback((path: string) => {
+    const trimmed = path.trim();
+    if (!trimmed) return;
+    const fileName = trimmed.split(/[\\/]/).pop() || trimmed;
+    const selected = attachments.includes(trimmed);
+    setAttachments((previous) => selected
+      ? previous.filter((item) => item !== trimmed)
+      : [...previous, trimmed]);
+    if (selected) {
+      toast(`已取消选择：${fileName}`, "info");
+      return;
+    }
+    addRecentFile(trimmed);
+    setInput((previous) => previous.trim() ? previous : "请解读所选项目文件，总结关键信息、异常风险和下一步建议。");
+    toast(`已加入本次任务：${fileName}`, "success");
+  }, [addRecentFile, attachments, toast]);
+
+  const prepareFileTask = useCallback((prompt: string) => {
+    if (attachments.length === 0) {
+      setAssistantSidebarView("files");
+      toast("请先从项目文件中选择本次任务要使用的文件", "info");
+      return;
+    }
+    setInput(prompt);
+  }, [attachments.length, toast]);
+
   // ====== 从文件浏览器一键执行工具 ======
   // 点击"单据"/"数据"按钮：通过 toolsPanelRef 命令式调用 loadFile，
   // 直接操作 ToolsPanel 内部 state，无 state 同步问题，连续点击独立可靠。
@@ -1480,42 +1506,87 @@ export default function App() {
               <span><strong>项目</strong><small>{availableProjectNames.length} 个工作区</small></span>
               <ChevronRight size={15} />
             </button>
+            <button
+              className={`assistant-entry assistant-files-entry ${assistantSidebarView === "files" ? "active" : ""}`}
+              onClick={() => setAssistantSidebarView("files")}
+            >
+              <span className="assistant-entry-icon"><Files size={17} /></span>
+              <span><strong>项目文件</strong><small>{attachments.length > 0 ? `已选 ${attachments.length} 个文件` : "选择任务上下文"}</small></span>
+              <ChevronRight size={15} />
+            </button>
           </div>
 
-          <div className="assistant-history-heading">
-            <strong>{assistantSidebarView === "projects" ? "项目对话" : "历史对话"}</strong>
-            <span>{filteredSessions.length}</span>
-          </div>
-          {sessions.length > 0 && (
-            <label className="assistant-history-search">
-              <Search size={14} />
-              <input value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索历史对话" />
-            </label>
-          )}
-
-          <div className="assistant-history-list">
-            {filteredSessions.length === 0 ? (
-              <div className="assistant-history-empty">
-                <MessageSquare size={22} />
-                <span>{sessions.length === 0 ? "还没有历史对话" : "没有匹配的对话"}</span>
+          {assistantSidebarView === "files" ? (
+            <div className="assistant-files-view">
+              <header className="assistant-files-header">
+                <span>
+                  <strong>工作文件</strong>
+                  <small title={workdir || currentSessionCwd || undefined}>{workdir || currentSessionCwd || "选择工作目录后显示项目文件"}</small>
+                </span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const selected = await openDialog({ directory: true, multiple: false, defaultPath: workdir || undefined });
+                      if (!selected) return;
+                      const dir = Array.isArray(selected) ? selected[0] : selected;
+                      if (dir) await applyWorkdir(dir);
+                    } catch (error) { toast(`选择目录失败: ${error}`, "error"); }
+                  }}
+                  title="选择工作目录"
+                ><FolderOpen size={16} /></button>
+              </header>
+              <div className="assistant-files-browser">
+                <FileBrowser
+                  currentCwd={workdir || currentSessionCwd}
+                  compact
+                  hideTabs
+                  selectionMode
+                  selectedFiles={attachments}
+                  onToggleFile={toggleProjectFile}
+                  onPickFile={pickFileFromBrowser}
+                  onRunTool={runToolFromBrowser}
+                />
               </div>
-            ) : assistantSidebarView === "quick" ? (
-              filteredSessions.map((session) => renderAssistantSession(session))
-            ) : projectSessions.map(([projectName, groupSessions]) => {
-              const collapsed = collapsedProjects.has(projectName);
-              return (
-                <section className="assistant-project-group" key={projectName}>
-                  <button className="assistant-project-heading" onClick={() => toggleProjectCollapse(projectName)}>
-                    {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                    <FolderOpen size={14} />
-                    <strong>{projectName}</strong>
-                    <span>{groupSessions.length}</span>
-                  </button>
-                  {!collapsed && groupSessions.map((session) => renderAssistantSession(session, true))}
-                </section>
-              );
-            })}
-          </div>
+            </div>
+          ) : (
+            <>
+              <div className="assistant-history-heading">
+                <strong>{assistantSidebarView === "projects" ? "项目对话" : "历史对话"}</strong>
+                <span>{filteredSessions.length}</span>
+              </div>
+              {sessions.length > 0 && (
+                <label className="assistant-history-search">
+                  <Search size={14} />
+                  <input value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索历史对话" />
+                </label>
+              )}
+
+              <div className="assistant-history-list">
+                {filteredSessions.length === 0 ? (
+                  <div className="assistant-history-empty">
+                    <MessageSquare size={22} />
+                    <span>{sessions.length === 0 ? "还没有历史对话" : "没有匹配的对话"}</span>
+                  </div>
+                ) : assistantSidebarView === "quick" ? (
+                  filteredSessions.map((session) => renderAssistantSession(session))
+                ) : projectSessions.map(([projectName, groupSessions]) => {
+                  const collapsed = collapsedProjects.has(projectName);
+                  return (
+                    <section className="assistant-project-group" key={projectName}>
+                      <button className="assistant-project-heading" onClick={() => toggleProjectCollapse(projectName)}>
+                        {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                        <FolderOpen size={14} />
+                        <strong>{projectName}</strong>
+                        <span>{groupSessions.length}</span>
+                      </button>
+                      {!collapsed && groupSessions.map((session) => renderAssistantSession(session, true))}
+                    </section>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </aside>}
 
         {workspaceView === "tool" && <aside className="context-sidebar" aria-label="文件管理">
@@ -1742,38 +1813,52 @@ export default function App() {
                     <div>
                       <div className="empty-mark">PILOT 工作台</div>
                       <h3>今天想处理什么物流工作？</h3>
-                      <p>直接描述任务或添加附件，需要批量处理时也可以切到工具页选择工作文件。</p>
+                      <p>我可以结合左侧选中的项目文件，帮你解读单证、总结数据、起草邮件或继续调用业务工具。</p>
                     </div>
                   </div>
+                  {attachments.length > 0 && (
+                    <section className="assistant-task-files">
+                      <header><strong>本次任务使用的文件</strong><span>{attachments.length} 个文件</span></header>
+                      <div>
+                        {attachments.map((path) => {
+                          const name = path.split(/[\\/]/).pop() || path;
+                          return (
+                            <span className="assistant-task-file" key={path} title={path}>
+                              <Paperclip size={14} />
+                              <span>{name}</span>
+                              <button type="button" onClick={() => removeAttachment(path)} title="移除文件">×</button>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  )}
                   <div className="empty-suggestion-grid">
-                    <button onClick={() => setInput("请检查当前项目资料是否完整，列出缺失文件、字段和下一步建议。") }>
+                    <button onClick={() => prepareFileTask("请解读所选项目文件，总结关键单证信息、异常风险和下一步建议。") }>
                       <span><FileCheck2 size={17} /></span>
-                      <strong>检查资料完整性</strong>
-                      <small>识别缺失文件与关键字段</small>
+                      <strong>解读所选文件</strong>
+                      <small>总结关键单证信息与风险</small>
                       <ChevronRight size={15} />
                     </button>
-                    <button onClick={() => setInput("请解读我添加的资料，总结关键信息、潜在风险和下一步建议。")}>
-                      <span><FolderOpen size={17} /></span>
-                      <strong>解读项目文件</strong>
-                      <small>结合所选文件给出摘要</small>
-                      <ChevronRight size={15} />
-                    </button>
-                    <button onClick={() => {
-                      const tool = toolsList.find((item) => item.name.includes("发票") || item.name.includes("装箱"));
-                      if (tool) { setWorkspaceView("tool"); setContextPanelTab("files"); toolsPanelRef.current?.selectTool(tool.id); }
-                    }}>
-                      <span><Files size={17} /></span>
-                      <strong>生成发票与装箱单</strong>
-                      <small>预检数据并按模板输出</small>
-                      <ChevronRight size={15} />
-                    </button>
-                    <button onClick={() => {
-                      const tool = toolsList.find((item) => item.name.includes("数据") || item.name.includes("分析"));
-                      if (tool) { setWorkspaceView("tool"); setContextPanelTab("files"); toolsPanelRef.current?.selectTool(tool.id); }
-                    }}>
+                    <button onClick={() => prepareFileTask("请汇总所选项目文件中的数据，列出关键指标、差异、异常和可执行结论。")}>
                       <span><ChartNoAxesCombined size={17} /></span>
-                      <strong>分析 Excel 数据</strong>
-                      <small>清洗、汇总并发现异常</small>
+                      <strong>总结项目数据</strong>
+                      <small>提取指标、差异与异常</small>
+                      <ChevronRight size={15} />
+                    </button>
+                    <button onClick={() => prepareFileTask("请根据所选项目文件起草一封专业的客户邮件，说明当前情况、关键数据和需要客户确认的事项。") }>
+                      <span><Pencil size={17} /></span>
+                      <strong>起草客户邮件</strong>
+                      <small>基于项目资料生成邮件</small>
+                      <ChevronRight size={15} />
+                    </button>
+                    <button onClick={() => {
+                      setWorkspaceView("tool");
+                      setContextPanelTab("files");
+                    }}>
+                      <span><Wrench size={17} /></span>
+                      <strong>继续调用业务工具</strong>
+                      <small>使用所选文件执行物流工具</small>
                       <ChevronRight size={15} />
                     </button>
                   </div>
