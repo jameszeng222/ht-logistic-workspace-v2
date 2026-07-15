@@ -4489,3 +4489,31 @@ body {
   .body.workspace-mode.tool-view,
   .body.workspace-mode.tool-view:has(.main.main-empty) { padding-left: 0; }
 }
+
+/* V4.2: remove the unused tool grid row and tighten the global rail. */
+:root { --mode-rail-w: 78px; }
+
+.mode-rail {
+  padding-top: calc(var(--header-h) + 12px);
+  padding-right: 6px;
+  padding-left: 6px;
+}
+
+.mode-rail-item,
+.mode-rail-model,
+.mode-rail-settings,
+.mode-rail-health { width: 64px; }
+
+.tool-page { grid-template-rows: auto minmax(0, 1fr); }
+.tool-page:has(> .tools-banner) { grid-template-rows: auto auto minmax(0, 1fr); }
+
+.tool-view .workspace-main .tool-workbench,
+.tool-view .workspace-main .tool-workbench.active { background: #ecefed; }
+
+@media (max-width: 900px) {
+  :root { --mode-rail-w: 74px; }
+  .mode-rail-item,
+  .mode-rail-model,
+  .mode-rail-settings,
+  .mode-rail-health { width: 62px; }
+}
