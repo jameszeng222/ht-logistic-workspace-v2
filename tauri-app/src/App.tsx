@@ -36,6 +36,7 @@ import {
   Files,
   FolderInput,
   FolderOpen,
+  Mail,
   MessageSquare,
   MoreHorizontal,
   Moon,
@@ -45,6 +46,7 @@ import {
   Search,
   Settings,
   Sheet,
+  Sparkles,
   Sun,
   Trash2,
   Wrench,
@@ -61,6 +63,90 @@ interface SessionStats { contextUsage?: { percent: number; tokens: number; conte
 interface JsonModel { id: string; name: string; }
 interface JsonProvider { baseUrl: string; api: string; apiKey: string; models: JsonModel[]; }
 interface ModelsConfig { providers: Record<string, JsonProvider>; }
+type QuickActionKind = "prompt" | "files" | "tools";
+type QuickActionIcon = "document" | "chart" | "mail" | "sparkles" | "folder" | "tool";
+interface QuickAction {
+  id: string;
+  title: string;
+  description: string;
+  kind: QuickActionKind;
+  prompt: string;
+  requiresFiles: boolean;
+  icon: QuickActionIcon;
+}
+
+const DEFAULT_QUICK_ACTIONS: QuickAction[] = [
+  {
+    id: "interpret-files",
+    title: "解读所选文件",
+    description: "总结关键单证信息与风险",
+    kind: "prompt",
+    prompt: "请解读所选项目文件，总结关键单证信息、异常风险和下一步建议。",
+    requiresFiles: true,
+    icon: "document",
+  },
+  {
+    id: "summarize-data",
+    title: "总结项目数据",
+    description: "提取指标、差异与异常",
+    kind: "prompt",
+    prompt: "请汇总所选项目文件中的数据，列出关键指标、差异、异常和可执行结论。",
+    requiresFiles: true,
+    icon: "chart",
+  },
+  {
+    id: "draft-email",
+    title: "起草客户邮件",
+    description: "基于项目资料生成邮件",
+    kind: "prompt",
+    prompt: "请根据所选项目文件起草一封专业的客户邮件，说明当前情况、关键数据和需要客户确认的事项。",
+    requiresFiles: true,
+    icon: "mail",
+  },
+  {
+    id: "open-tools",
+    title: "继续调用业务工具",
+    description: "进入物流工具执行任务",
+    kind: "tools",
+    prompt: "",
+    requiresFiles: false,
+    icon: "tool",
+  },
+];
+
+function loadQuickActions(): QuickAction[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem("ht-quick-actions") || "null");
+    if (!Array.isArray(parsed)) return DEFAULT_QUICK_ACTIONS;
+    const validIcons: QuickActionIcon[] = ["document", "chart", "mail", "sparkles", "folder", "tool"];
+    const actions = parsed
+      .filter((item) => Boolean(
+        item && typeof item.id === "string" && typeof item.title === "string"
+        && typeof item.description === "string" && ["prompt", "files", "tools"].includes(item.kind)
+      ))
+      .map((item) => ({
+        id: item.id,
+        title: item.title,
+        description: item.description,
+        kind: item.kind as QuickActionKind,
+        prompt: typeof item.prompt === "string" ? item.prompt : "",
+        requiresFiles: Boolean(item.requiresFiles),
+        icon: validIcons.includes(item.icon) ? item.icon : "sparkles",
+      } satisfies QuickAction));
+    return actions.length > 0 ? actions : DEFAULT_QUICK_ACTIONS;
+  } catch {
+    return DEFAULT_QUICK_ACTIONS;
+  }
+}
+
+function QuickActionGlyph({ icon, size = 17 }: { icon: QuickActionIcon; size?: number }) {
+  if (icon === "document") return <FileCheck2 size={size} />;
+  if (icon === "chart") return <ChartNoAxesCombined size={size} />;
+  if (icon === "mail") return <Mail size={size} />;
+  if (icon === "folder") return <FolderOpen size={size} />;
+  if (icon === "tool") return <Wrench size={size} />;
+  return <Sparkles size={size} />;
+}
 
 function formatSessionTime(timestamp: number) {
   const value = timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp;
@@ -142,6 +228,8 @@ export default function App() {
   const [workspaceView, setWorkspaceView] = useState<"assistant" | "tool">("assistant");
   const [assistantSidebarView, setAssistantSidebarView] = useState<"quick" | "files">("quick");
   const [contextPanelTab, setContextPanelTab] = useState<"files" | "outputs">("files");
+  const [quickActions, setQuickActions] = useState<QuickAction[]>(loadQuickActions);
+  const [editingQuickAction, setEditingQuickAction] = useState<QuickAction | null>(null);
   // 下拉框定位：用 fixed + Portal 渲染到 body，彻底脱离所有父容器 overflow 裁切
   const modelBtnRef = useRef<HTMLButtonElement>(null);
   const railModelBtnRef = useRef<HTMLButtonElement>(null);
@@ -1083,6 +1171,66 @@ export default function App() {
     setInput(prompt);
   }, [attachments.length, toast]);
 
+  const persistQuickActions = useCallback((next: QuickAction[]) => {
+    setQuickActions(next);
+    localStorage.setItem("ht-quick-actions", JSON.stringify(next));
+  }, []);
+
+  const runQuickAction = useCallback((action: QuickAction) => {
+    if (action.kind === "tools") {
+      setWorkspaceView("tool");
+      setContextPanelTab("files");
+      return;
+    }
+    if (action.kind === "files") {
+      setWorkspaceView("assistant");
+      setAssistantSidebarView("files");
+      return;
+    }
+    setWorkspaceView("assistant");
+    setAssistantSidebarView("quick");
+    if (action.requiresFiles) prepareFileTask(action.prompt);
+    else setInput(action.prompt);
+  }, [prepareFileTask]);
+
+  const createQuickAction = useCallback(() => {
+    setEditingQuickAction({
+      id: `custom-${Date.now()}`,
+      title: "新快捷操作",
+      description: "填写这个操作的用途",
+      kind: "prompt",
+      prompt: "",
+      requiresFiles: false,
+      icon: "sparkles",
+    });
+  }, []);
+
+  const saveQuickAction = useCallback(() => {
+    if (!editingQuickAction) return;
+    const normalized = {
+      ...editingQuickAction,
+      title: editingQuickAction.title.trim(),
+      description: editingQuickAction.description.trim(),
+      prompt: editingQuickAction.prompt.trim(),
+    };
+    if (!normalized.title) { toast("请填写快捷操作名称", "info"); return; }
+    if (normalized.kind === "prompt" && !normalized.prompt) { toast("请填写要使用的提示词", "info"); return; }
+    const exists = quickActions.some((action) => action.id === normalized.id);
+    persistQuickActions(exists
+      ? quickActions.map((action) => action.id === normalized.id ? normalized : action)
+      : [...quickActions, normalized]);
+    setEditingQuickAction(null);
+    toast(exists ? "快捷操作已更新" : "快捷操作已添加", "success");
+  }, [editingQuickAction, persistQuickActions, quickActions, toast]);
+
+  const deleteQuickAction = useCallback(() => {
+    if (!editingQuickAction || !quickActions.some((action) => action.id === editingQuickAction.id)) return;
+    if (!confirm(`删除快捷操作“${editingQuickAction.title}”？`)) return;
+    persistQuickActions(quickActions.filter((action) => action.id !== editingQuickAction.id));
+    setEditingQuickAction(null);
+    toast("快捷操作已删除", "success");
+  }, [editingQuickAction, persistQuickActions, quickActions, toast]);
+
   // ====== 从文件浏览器一键执行工具 ======
   // 点击"单据"/"数据"按钮：通过 toolsPanelRef 命令式调用 loadFile，
   // 直接操作 ToolsPanel 内部 state，无 state 同步问题，连续点击独立可靠。
@@ -1396,7 +1544,7 @@ export default function App() {
       <header className="header">
         <div className="app-brand">
           <span className="app-brand-mark">HT</span>
-          <span>Logistic Workspace</span>
+          <span className="app-brand-copy"><strong>Logistic</strong><small>Workspace</small></span>
         </div>
         <span className={`header-status ${ready ? (busy ? "busy" : "ready") : "error"}`}>
           <span className="dot" />
@@ -1830,35 +1978,25 @@ export default function App() {
                       </div>
                     </section>
                   )}
-                  <div className="empty-suggestion-grid">
-                    <button onClick={() => prepareFileTask("请解读所选项目文件，总结关键单证信息、异常风险和下一步建议。") }>
-                      <span><FileCheck2 size={17} /></span>
-                      <strong>解读所选文件</strong>
-                      <small>总结关键单证信息与风险</small>
-                      <ChevronRight size={15} />
-                    </button>
-                    <button onClick={() => prepareFileTask("请汇总所选项目文件中的数据，列出关键指标、差异、异常和可执行结论。")}>
-                      <span><ChartNoAxesCombined size={17} /></span>
-                      <strong>总结项目数据</strong>
-                      <small>提取指标、差异与异常</small>
-                      <ChevronRight size={15} />
-                    </button>
-                    <button onClick={() => prepareFileTask("请根据所选项目文件起草一封专业的客户邮件，说明当前情况、关键数据和需要客户确认的事项。") }>
-                      <span><Pencil size={17} /></span>
-                      <strong>起草客户邮件</strong>
-                      <small>基于项目资料生成邮件</small>
-                      <ChevronRight size={15} />
-                    </button>
-                    <button onClick={() => {
-                      setWorkspaceView("tool");
-                      setContextPanelTab("files");
-                    }}>
-                      <span><Wrench size={17} /></span>
-                      <strong>继续调用业务工具</strong>
-                      <small>使用所选文件执行物流工具</small>
-                      <ChevronRight size={15} />
-                    </button>
-                  </div>
+                  <section className="empty-suggestion-section">
+                    <header className="empty-suggestion-header">
+                      <span>快捷操作</span>
+                      <button type="button" onClick={createQuickAction} title="添加快捷操作" aria-label="添加快捷操作"><Plus size={15} /></button>
+                    </header>
+                    <div className="empty-suggestion-grid">
+                      {quickActions.map((action) => (
+                        <article className="quick-action-card" key={action.id}>
+                          <button className="quick-action-main" onClick={() => runQuickAction(action)}>
+                            <span className="quick-action-icon"><QuickActionGlyph icon={action.icon} /></span>
+                            <span className="quick-action-copy"><strong>{action.title}</strong><small>{action.description}</small></span>
+                            <ChevronRight size={15} />
+                          </button>
+                          <button className="quick-action-edit" onClick={() => setEditingQuickAction({ ...action })} title={`编辑：${action.title}`} aria-label={`编辑快捷操作：${action.title}`}><Pencil size={13} /></button>
+                        </article>
+                      ))}
+                      {quickActions.length === 0 && <button className="quick-action-empty" type="button" onClick={createQuickAction}><Plus size={15} />添加第一个快捷操作</button>}
+                    </div>
+                  </section>
                 </div>
               ) : turns.map((turn) => (
                 <div key={turn.id} className="turn">
@@ -2110,6 +2248,33 @@ export default function App() {
       <div className="toast-container">
         {toasts.map((t) => <div key={t.id} className={`toast ${t.type}`}>{t.msg}</div>)}
       </div>
+
+      {editingQuickAction && (
+        <div className="modal-overlay" onClick={() => setEditingQuickAction(null)}>
+          <div className="modal quick-action-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="quick-action-modal-heading">
+              <div><strong>{quickActions.some((action) => action.id === editingQuickAction.id) ? "编辑快捷操作" : "添加快捷操作"}</strong><small>设置卡片显示内容和点击后的动作</small></div>
+              <button type="button" onClick={() => setEditingQuickAction(null)} title="关闭" aria-label="关闭">×</button>
+            </div>
+            <div className="quick-action-form-grid">
+              <label><span>名称</span><input value={editingQuickAction.title} onChange={(event) => setEditingQuickAction((current) => current ? { ...current, title: event.target.value } : current)} placeholder="例如：生成报价说明" autoFocus /></label>
+              <label><span>卡片说明</span><input value={editingQuickAction.description} onChange={(event) => setEditingQuickAction((current) => current ? { ...current, description: event.target.value } : current)} placeholder="简短说明这个操作的用途" /></label>
+              <label><span>点击动作</span><select value={editingQuickAction.kind} onChange={(event) => setEditingQuickAction((current) => current ? { ...current, kind: event.target.value as QuickActionKind } : current)}><option value="prompt">填写提示词</option><option value="files">打开项目文件</option><option value="tools">进入物流工具</option></select></label>
+              <label><span>图标</span><select value={editingQuickAction.icon} onChange={(event) => setEditingQuickAction((current) => current ? { ...current, icon: event.target.value as QuickActionIcon } : current)}><option value="sparkles">智能操作</option><option value="document">文档</option><option value="chart">数据图表</option><option value="mail">邮件</option><option value="folder">文件夹</option><option value="tool">工具</option></select></label>
+            </div>
+            {editingQuickAction.kind === "prompt" && (
+              <label className="quick-action-prompt-field"><span>提示词</span><textarea value={editingQuickAction.prompt} onChange={(event) => setEditingQuickAction((current) => current ? { ...current, prompt: event.target.value } : current)} placeholder="点击卡片后填入聊天框的提示词" rows={5} /></label>
+            )}
+            {editingQuickAction.kind === "prompt" && (
+              <label className="quick-action-file-toggle"><input type="checkbox" checked={editingQuickAction.requiresFiles} onChange={(event) => setEditingQuickAction((current) => current ? { ...current, requiresFiles: event.target.checked } : current)} /><span><strong>需要项目文件</strong><small>没有选择文件时，先打开项目文件列表</small></span></label>
+            )}
+            <div className="quick-action-modal-actions">
+              {quickActions.some((action) => action.id === editingQuickAction.id) ? <button className="quick-action-delete" type="button" onClick={deleteQuickAction}><Trash2 size={14} />删除</button> : <span />}
+              <div><button className="btn-secondary" type="button" onClick={() => setEditingQuickAction(null)}>取消</button><button className="btn-primary" type="button" onClick={saveQuickAction}>保存</button></div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {movingSessionPath && (
         <div className="modal-overlay" onClick={() => setMovingSessionPath(null)}>
