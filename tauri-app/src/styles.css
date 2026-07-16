@@ -3288,12 +3288,22 @@ body {
 
 .header .app-brand {
   display: inline-flex;
-  margin-left: calc(var(--mode-rail-w) + 10px);
+  gap: 9px;
+  margin-left: 10px;
   color: #33403a;
   font-size: 13px;
   font-weight: 650;
 }
-.header .app-brand-mark { display: none; }
+.header .app-brand-mark {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: #173f38;
+  color: #ffffff;
+  font-size: 11px;
+  box-shadow: 0 1px 2px rgba(23, 63, 56, .12);
+}
 .header-service-health {
   display: inline-flex;
   align-items: center;
@@ -3603,20 +3613,6 @@ body {
   border-right: 1px solid #d9dedb;
 }
 
-.mode-rail-brand {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  flex: 0 0 38px;
-  margin-bottom: 22px;
-  border-radius: 7px;
-  background: #173f38;
-  color: #ffffff;
-  font-size: 12px;
-  font-weight: 750;
-}
-
 .mode-rail-list {
   display: flex;
   width: 100%;
@@ -3743,7 +3739,6 @@ body {
 .assistant-entry strong { overflow: hidden; color: var(--fg); font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .assistant-entry small { color: var(--fg-subtle); font-size: 9.5px; }
 .assistant-entry.active strong { color: #175f54; }
-.assistant-project-entry { margin-top: 2px; }
 .assistant-files-entry { margin-top: 2px; }
 
 .assistant-new-chat {

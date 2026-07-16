@@ -34,7 +34,6 @@ import {
   FileCheck2,
   FileOutput,
   Files,
-  FolderInput,
   FolderOpen,
   MessageSquare,
   MoreHorizontal,
@@ -140,7 +139,7 @@ export default function App() {
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showPermissionDropdown, setShowPermissionDropdown] = useState(false);
   const [workspaceView, setWorkspaceView] = useState<"assistant" | "tool">("assistant");
-  const [assistantSidebarView, setAssistantSidebarView] = useState<"quick" | "projects" | "files">("quick");
+  const [assistantSidebarView, setAssistantSidebarView] = useState<"quick" | "files">("quick");
   const [contextPanelTab, setContextPanelTab] = useState<"files" | "outputs">("files");
   // 下拉框定位：用 fixed + Portal 渲染到 body，彻底脱离所有父容器 overflow 裁切
   const modelBtnRef = useRef<HTMLButtonElement>(null);
@@ -874,7 +873,7 @@ export default function App() {
       return next;
     });
     setMovingSessionPath(null);
-    setAssistantSidebarView("projects");
+    setAssistantSidebarView("quick");
     toast(`已移动到项目：${project}`, "success");
   }, [moveProjectInput, movingSessionPath, toast]);
 
@@ -1381,7 +1380,6 @@ export default function App() {
             <button className="session-menu-dismiss" onClick={() => setSessionMenuPath(null)} aria-label="关闭会话菜单" />
             <div className="assistant-session-menu">
               <button onClick={() => startRename(session)}><Pencil size={14} />重命名</button>
-              <button onClick={() => startMoveSession(session)}><FolderInput size={14} />移动到项目</button>
               <button className="danger" onClick={(event) => deleteSession(session.path, event)}><Trash2 size={14} />删除</button>
             </div>
           </>
@@ -1454,7 +1452,6 @@ export default function App() {
       {/* ============ 主体 ============ */}
       <div className={`body workspace-mode ${workspaceView === "tool" ? "tool-view" : "assistant-view"}`}>
         <aside className="mode-rail" aria-label="页面切换">
-          <div className="mode-rail-brand" title="HT Logistic Workspace">HT</div>
           <nav className="mode-rail-list">
             <button
               className={`mode-rail-item ${workspaceView === "assistant" ? "active" : ""}`}
@@ -1501,18 +1498,10 @@ export default function App() {
               onClick={newSession}
             >
               <span className="assistant-entry-icon"><MessageSquare size={17} /></span>
-              <span><strong>快速问答</strong><small>直接开始对话</small></span>
+              <span><strong>快速问答</strong><small>新建对话 · 全部历史</small></span>
             </button>
             <button className="assistant-new-chat" onClick={newSession} disabled={busy} title="新建快速问答">
               <Plus size={16} />
-            </button>
-            <button
-              className={`assistant-entry assistant-project-entry ${assistantSidebarView === "projects" ? "active" : ""}`}
-              onClick={() => setAssistantSidebarView("projects")}
-            >
-              <span className="assistant-entry-icon"><FolderOpen size={17} /></span>
-              <span><strong>项目</strong><small>{availableProjectNames.length} 个工作区</small></span>
-              <ChevronRight size={15} />
             </button>
             <button
               className={`assistant-entry assistant-files-entry ${assistantSidebarView === "files" ? "active" : ""}`}
@@ -1560,7 +1549,7 @@ export default function App() {
           ) : (
             <>
               <div className="assistant-history-heading">
-                <strong>{assistantSidebarView === "projects" ? "项目对话" : "历史对话"}</strong>
+                <strong>历史对话</strong>
                 <span>{filteredSessions.length}</span>
               </div>
               {sessions.length > 0 && (
@@ -1576,22 +1565,7 @@ export default function App() {
                     <MessageSquare size={22} />
                     <span>{sessions.length === 0 ? "还没有历史对话" : "没有匹配的对话"}</span>
                   </div>
-                ) : assistantSidebarView === "quick" ? (
-                  filteredSessions.map((session) => renderAssistantSession(session))
-                ) : projectSessions.map(([projectName, groupSessions]) => {
-                  const collapsed = collapsedProjects.has(projectName);
-                  return (
-                    <section className="assistant-project-group" key={projectName}>
-                      <button className="assistant-project-heading" onClick={() => toggleProjectCollapse(projectName)}>
-                        {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                        <FolderOpen size={14} />
-                        <strong>{projectName}</strong>
-                        <span>{groupSessions.length}</span>
-                      </button>
-                      {!collapsed && groupSessions.map((session) => renderAssistantSession(session, true))}
-                    </section>
-                  );
-                })}
+                ) : filteredSessions.map((session) => renderAssistantSession(session))}
               </div>
             </>
           )}
