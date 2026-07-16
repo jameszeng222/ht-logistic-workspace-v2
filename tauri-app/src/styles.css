@@ -4592,7 +4592,7 @@ body {
 
 .header {
   position: relative;
-  z-index: 5;
+  z-index: 10;
   background: #ecefed;
   border-bottom: 0;
 }

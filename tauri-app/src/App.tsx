@@ -34,6 +34,7 @@ import {
   FileCheck2,
   FileOutput,
   Files,
+  FolderInput,
   FolderOpen,
   MessageSquare,
   MoreHorizontal,
@@ -1380,6 +1381,7 @@ export default function App() {
             <button className="session-menu-dismiss" onClick={() => setSessionMenuPath(null)} aria-label="关闭会话菜单" />
             <div className="assistant-session-menu">
               <button onClick={() => startRename(session)}><Pencil size={14} />重命名</button>
+              <button onClick={() => startMoveSession(session)}><FolderInput size={14} />移动到项目</button>
               <button className="danger" onClick={(event) => deleteSession(session.path, event)}><Trash2 size={14} />删除</button>
             </div>
           </>
@@ -1498,7 +1500,7 @@ export default function App() {
               onClick={newSession}
             >
               <span className="assistant-entry-icon"><MessageSquare size={17} /></span>
-              <span><strong>快速问答</strong><small>新建对话 · 全部历史</small></span>
+              <span><strong>快速问答</strong><small>新建对话 · 按项目整理</small></span>
             </button>
             <button className="assistant-new-chat" onClick={newSession} disabled={busy} title="新建快速问答">
               <Plus size={16} />
@@ -1549,13 +1551,13 @@ export default function App() {
           ) : (
             <>
               <div className="assistant-history-heading">
-                <strong>历史对话</strong>
-                <span>{filteredSessions.length}</span>
+                <strong>项目</strong>
+                <span>{projectSessions.length}</span>
               </div>
               {sessions.length > 0 && (
                 <label className="assistant-history-search">
                   <Search size={14} />
-                  <input value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索历史对话" />
+                  <input value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索项目或对话" />
                 </label>
               )}
 
@@ -1563,9 +1565,22 @@ export default function App() {
                 {filteredSessions.length === 0 ? (
                   <div className="assistant-history-empty">
                     <MessageSquare size={22} />
-                    <span>{sessions.length === 0 ? "还没有历史对话" : "没有匹配的对话"}</span>
+                    <span>{sessions.length === 0 ? "还没有项目对话" : "没有匹配的项目或对话"}</span>
                   </div>
-                ) : filteredSessions.map((session) => renderAssistantSession(session))}
+                ) : projectSessions.map(([projectName, groupSessions]) => {
+                  const collapsed = collapsedProjects.has(projectName);
+                  return (
+                    <section className="assistant-project-group" key={projectName}>
+                      <button className="assistant-project-heading" onClick={() => toggleProjectCollapse(projectName)}>
+                        {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                        <FolderOpen size={14} />
+                        <strong>{projectName}</strong>
+                        <span>{groupSessions.length}</span>
+                      </button>
+                      {!collapsed && groupSessions.map((session) => renderAssistantSession(session, true))}
+                    </section>
+                  );
+                })}
               </div>
             </>
           )}
