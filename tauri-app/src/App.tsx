@@ -34,6 +34,7 @@ import {
   FileCheck2,
   FileOutput,
   Files,
+  ExternalLink,
   FolderInput,
   FolderOpen,
   Mail,
@@ -73,6 +74,12 @@ interface QuickAction {
   prompt: string;
   requiresFiles: boolean;
   icon: QuickActionIcon;
+}
+
+interface ToolOutput {
+  path: string;
+  toolName: string;
+  time: number;
 }
 
 const DEFAULT_QUICK_ACTIONS: QuickAction[] = [
@@ -1114,12 +1121,27 @@ export default function App() {
 
   // ====== 最近使用文件 + 工具输出（右侧文件栏上下文区）======
   // recentFiles: 用户最近分析/执行工具的文件，localStorage 持久化，最多 5 个
-  // toolOutputs: 工具执行后保存的输出文件，最近 3 个
+  // toolOutputs: 工具执行后保存的输出文件，localStorage 持久化，最近 10 个
   const [recentFiles, setRecentFiles] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem("pi-recent-files") || "[]"); }
     catch { return []; }
   });
-  const [toolOutputs, setToolOutputs] = useState<{ path: string; toolName: string; time: number }[]>([]);
+  const [toolOutputs, setToolOutputs] = useState<ToolOutput[]>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem("pi-tool-outputs") || "[]");
+      if (!Array.isArray(stored)) return [];
+      return stored
+        .filter((item): item is ToolOutput => (
+          typeof item?.path === "string"
+          && typeof item?.toolName === "string"
+          && typeof item?.time === "number"
+        ))
+        .sort((a, b) => b.time - a.time)
+        .slice(0, 10);
+    } catch {
+      return [];
+    }
+  });
   const addRecentFile = useCallback((path: string) => {
     setRecentFiles((prev) => {
       const next = [path, ...prev.filter((p) => p !== path)].slice(0, 5);
@@ -1128,7 +1150,15 @@ export default function App() {
     });
   }, []);
   const addToolOutput = useCallback((path: string, toolName: string) => {
-    setToolOutputs((prev) => [{ path, toolName, time: Date.now() }, ...prev].slice(0, 3));
+    setToolOutputs((prev) => {
+      const next = [
+        { path, toolName, time: Date.now() },
+        ...prev.filter((item) => item.path !== path),
+      ].slice(0, 10);
+      try { localStorage.setItem("pi-tool-outputs", JSON.stringify(next)); }
+      catch { /* 保留本次运行内的记录。 */ }
+      return next;
+    });
   }, []);
 
   // ====== 从文件浏览器一键加入聊天分析 ======
@@ -1144,6 +1174,36 @@ export default function App() {
     setWorkspaceView("assistant");
     toast(`已加入附件：${fileName}（可直接发送）`, "success");
   }, [toast, addRecentFile]);
+
+  const openToolOutput = useCallback(async (output: ToolOutput) => {
+    try {
+      await invoke("open_file", { path: output.path });
+    } catch (error) {
+      toast(`打开文件失败：${error}`, "error");
+    }
+  }, [toast]);
+
+  const locateToolOutput = useCallback(async (output: ToolOutput) => {
+    try {
+      await invoke("open_in_explorer", { path: output.path });
+    } catch (error) {
+      toast(`定位文件失败：${error}`, "error");
+    }
+  }, [toast]);
+
+  const addToolOutputToChat = useCallback((output: ToolOutput) => {
+    const trimmed = output.path.trim();
+    if (!trimmed) return;
+    const fileName = trimmed.split(/[\\/]/).pop() || trimmed;
+    setAttachments((prev) => prev.includes(trimmed) ? prev : [...prev, trimmed]);
+    setInput((prev) => prev.trim()
+      ? prev
+      : `请检查「${output.toolName}」生成的附件 ${fileName}，确认结果是否完整、准确，并给出下一步建议。`);
+    addRecentFile(trimmed);
+    setAssistantSidebarView("quick");
+    setWorkspaceView("assistant");
+    toast(`已放入聊天框：${fileName}`, "success");
+  }, [addRecentFile, toast]);
 
   const toggleProjectFile = useCallback((path: string) => {
     const trimmed = path.trim();
@@ -1784,16 +1844,28 @@ export default function App() {
                 ) : toolOutputs.map((output) => {
                   const name = output.path.split(/[\\/]/).pop() || output.path;
                   return (
-                    <button
+                    <div
                       key={`${output.path}-${output.time}`}
                       className="context-output-item"
-                      onClick={() => invoke("open_file", { path: output.path }).catch((error) => toast(`打开文件失败: ${error}`, "error"))}
                       title={output.path}
                     >
                       <span className="context-output-icon"><Sheet size={16} /></span>
-                      <span><strong>{name}</strong><small>{output.toolName} · {new Date(output.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small></span>
-                      <ChevronRight size={14} />
-                    </button>
+                      <span className="context-output-copy">
+                        <strong>{name}</strong>
+                        <small>{output.toolName} · {new Date(output.time).toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</small>
+                      </span>
+                      <span className="context-output-actions">
+                        <button type="button" onClick={() => openToolOutput(output)} title="打开文件" aria-label={`打开 ${name}`}>
+                          <ExternalLink size={14} />
+                        </button>
+                        <button type="button" onClick={() => locateToolOutput(output)} title="在文件管理器中定位" aria-label={`定位 ${name}`}>
+                          <FolderOpen size={14} />
+                        </button>
+                        <button type="button" onClick={() => addToolOutputToChat(output)} title="加入聊天附件" aria-label={`将 ${name} 加入聊天附件`}>
+                          <Paperclip size={14} />
+                        </button>
+                      </span>
+                    </div>
                   );
                 })}
               </div>
