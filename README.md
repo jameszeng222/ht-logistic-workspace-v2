@@ -147,6 +147,9 @@ npm install
 npm run tauri dev
 ```
 
+开发模式要求 Node.js 22.19 或更高版本，并使用 `tauri-app/package.json` 中固定版本的 Pi，不依赖系统全局安装。
+删除全局 `@earendil-works/pi-coding-agent` 不会影响 `npm run tauri dev`；如果本地依赖缺失，重新运行 `npm install` 即可。
+
 ## 常用命令
 
 ```powershell

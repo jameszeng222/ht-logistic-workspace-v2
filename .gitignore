@@ -23,6 +23,7 @@ tauri-app/src-tauri/pi-runtime/
 tauri-app/node_modules/
 tauri-app/dist/
 tauri-app/src-tauri/target/
+tauri-app/src-tauri/gen/
 
 # Local UI verification artifacts
 .playwright-cli/

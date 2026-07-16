@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.5",
   "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "dev": "vite --no-open",
     "build": "tsc && vite build",
@@ -15,8 +18,8 @@
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-fs": "^2.0.0",
-    "@tauri-apps/plugin-updater": "^2.0.0",
     "@tauri-apps/plugin-process": "^2.0.0",
+    "@tauri-apps/plugin-updater": "^2.0.0",
     "chart.js": "^4.4.3",
     "highlight.js": "^11.11.1",
     "lucide-react": "^0.468.0",
@@ -28,6 +31,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.7",
     "@tauri-apps/cli": "^2.0.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",

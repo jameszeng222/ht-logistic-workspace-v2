@@ -113,15 +113,15 @@ fn ensure_pi_runtime_extracted(resource_dir: Option<&std::path::Path>) -> Option
     }
 }
 
-/// 查找 pi（PATH + npm 全局目录）
+/// 查找 pi（应用内置 Runtime + 项目本地依赖 + 系统兼容路径）
 ///
 /// `resource_dir`：Tauri 的 resource_dir()，打包模式下传入；开发模式可传 None。
 /// 查找顺序：
 ///   0. 从打包的 pi-runtime.7z 解压到 %LOCALAPPDATA%\ht-logistic\pi-runtime\（打包模式首选）
 ///   1. resource_dir/pi-runtime/（兼容旧版松散文件打包）
-///   2. current_exe 向上 6 级找 pi-runtime（开发模式兜底）
-///   3. 当前工作目录及父目录（开发模式兜底）
-///   4. 系统 PATH 查找（用户自己装了 pi）
+///   2. current_exe / cwd 向上查找 pi-runtime（开发模式兜底）
+///   3. 项目 node_modules/.bin（开发模式首选，不要求全局安装 Pi）
+///   4. 系统 PATH 和 npm 全局目录（仅兼容旧开发环境）
 fn find_pi(resource_dir: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
     use std::path::PathBuf;
     let candidates: Vec<&str> = if cfg!(windows) {
@@ -191,7 +191,42 @@ fn find_pi(resource_dir: Option<&std::path::Path>) -> Option<std::path::PathBuf>
         }
     }
 
-    // 2. 系统 PATH 查找（用户自己装了 pi）
+    // 2. 开发模式：使用 tauri-app/package.json 声明的本地 Pi。
+    //    npm run tauri dev 通常会把 node_modules/.bin 注入 PATH，但这里仍显式
+    //    查找，避免不同 npm 启动方式、IDE 或 shell 导致 PATH 行为不一致。
+    let mut local_bin_candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        for ancestor in exe.ancestors().take(8) {
+            local_bin_candidates.push(ancestor.join("node_modules").join(".bin"));
+            local_bin_candidates.push(ancestor.join("tauri-app").join("node_modules").join(".bin"));
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        for ancestor in cwd.ancestors().take(6) {
+            local_bin_candidates.push(ancestor.join("node_modules").join(".bin"));
+            local_bin_candidates.push(ancestor.join("tauri-app").join("node_modules").join(".bin"));
+        }
+    }
+    #[cfg(debug_assertions)]
+    {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        if let Some(tauri_app_dir) = manifest_dir.parent() {
+            local_bin_candidates.push(tauri_app_dir.join("node_modules").join(".bin"));
+        }
+    }
+    local_bin_candidates.sort();
+    local_bin_candidates.dedup();
+    for bin_dir in &local_bin_candidates {
+        for cand in &candidates {
+            let full = bin_dir.join(cand);
+            if full.is_file() {
+                eprintln!("[pi] 使用项目本地 Pi: {}", full.display());
+                return Some(full);
+            }
+        }
+    }
+
+    // 3. 系统 PATH 查找（兼容旧开发环境）
     if let Ok(path_var) = std::env::var("PATH") {
         for dir in path_var.split(if cfg!(windows) { ';' } else { ':' }) {
             for cand in &candidates {
@@ -202,7 +237,7 @@ fn find_pi(resource_dir: Option<&std::path::Path>) -> Option<std::path::PathBuf>
             }
         }
     }
-    // 3. Windows npm 全局目录
+    // 4. Windows npm 全局目录（兼容旧开发环境）
     if cfg!(windows) {
         if let Ok(appdata) = std::env::var("APPDATA") {
             let npm_dir = PathBuf::from(&appdata).join("npm");
@@ -428,8 +463,11 @@ fn spawn_pi(
     // 打包模式下 resource_dir/pi-runtime/pi.cmd 是傻瓜包的 Pi 启动脚本。
     let resource_dir = app.path().resource_dir().ok();
     let pi_path = find_pi(resource_dir.as_deref()).ok_or_else(|| {
-        let path_var = std::env::var("PATH").unwrap_or_default();
-        format!("未找到 pi。PATH={path_var}\n请确认已 npm i -g @earendil-works/pi-coding-agent")
+        if cfg!(debug_assertions) {
+            "未找到项目本地 Pi。请在 tauri-app 目录运行 npm install 后重新启动。".to_string()
+        } else {
+            "客户端内置 Pi Runtime 缺失或损坏，请重新安装 HT Logistic Workspace。".to_string()
+        }
     })?;
 
     let mut cmd = if cfg!(windows) && pi_path.extension().map_or(false, |e| e == "cmd" || e == "bat") {
@@ -735,8 +773,7 @@ fn decode_cwd_dir(name: &str) -> String {
     let candidate = if decoded.len() >= 2 && decoded.as_bytes()[1] == b':' {
         let mut c = decoded.clone();
         c.replace_range(1..2, "\\");
-        c.replace('/', "\\");
-        c
+        c.replace('/', "\\")
     } else {
         decoded
     };

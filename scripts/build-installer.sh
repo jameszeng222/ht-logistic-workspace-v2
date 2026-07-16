@@ -50,6 +50,12 @@ echo -e "  sidecar 已就位 \033[32m✓\033[0m"
 echo ""
 echo -e "\033[33m[2/4] 准备 pi-runtime（便携版 Node.js + pi 包）...\033[0m"
 
+PI_PACKAGE_VERSION=$(node -p "require('$TAURI_DIR/package.json').devDependencies['@earendil-works/pi-coding-agent']")
+if [ -z "$PI_PACKAGE_VERSION" ] || [ "$PI_PACKAGE_VERSION" = "undefined" ]; then
+    echo "tauri-app/package.json 中缺少 Pi 版本" >&2; exit 1
+fi
+PI_PACKAGE_SPEC="@earendil-works/pi-coding-agent@$PI_PACKAGE_VERSION"
+
 rm -rf "$PI_RUNTIME_DIR"
 mkdir -p "$PI_RUNTIME_DIR"
 
@@ -82,7 +88,7 @@ echo "  安装 pi 包到 pi-runtime..."
 NPM_CLI=$(find "$NODE_TMP" -path "*/npm/bin/npm-cli.js" | head -1)
 echo '{"name":"pi-runtime","version":"1.0.0","private":true}' > "$PI_RUNTIME_DIR/package.json"
 cd "$PI_RUNTIME_DIR"
-"$PI_RUNTIME_DIR/node" "$NPM_CLI" install "@earendil-works/pi-coding-agent" --no-save --ignore-scripts > /dev/null 2>&1
+"$PI_RUNTIME_DIR/node" "$NPM_CLI" install "$PI_PACKAGE_SPEC" --no-save --ignore-scripts > /dev/null 2>&1
 if [ ! -d "node_modules/@earendil-works/pi-coding-agent" ]; then
     echo "pi 包安装失败" >&2; exit 1
 fi

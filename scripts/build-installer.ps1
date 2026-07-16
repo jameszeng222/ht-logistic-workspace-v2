@@ -18,6 +18,10 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $sidecarDir = Join-Path $repoRoot "python-sidecar"
 $tauriDir = Join-Path $repoRoot "tauri-app"
 $piRuntimeDir = Join-Path $repoRoot "pi-runtime"
+$tauriPackage = Get-Content (Join-Path $tauriDir "package.json") -Raw | ConvertFrom-Json
+$piPackageVersion = $tauriPackage.devDependencies.'@earendil-works/pi-coding-agent'
+if (-not $piPackageVersion) { throw "Pi version is missing from tauri-app/package.json devDependencies." }
+$piPackageSpec = "@earendil-works/pi-coding-agent@$piPackageVersion"
 
 function Write-PiLauncher {
     param([Parameter(Mandatory = $true)][string]$RuntimeDir)
@@ -174,7 +178,7 @@ try {
     # avoid NativeCommandError and surface diagnostics on failure.
     $npmLog = Join-Path $env:TEMP "ht-npm-install.log"
     $npmExe = Join-Path $piRuntimeDir "node.exe"
-    cmd /c "`"$npmExe`" `"$npmCli`" install @earendil-works/pi-coding-agent --no-save --ignore-scripts > `"$npmLog`" 2>&1"
+    cmd /c "`"$npmExe`" `"$npmCli`" install $piPackageSpec --no-save --ignore-scripts > `"$npmLog`" 2>&1"
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path "node_modules\@earendil-works\pi-coding-agent")) {
         Write-Host "  npm install log:" -ForegroundColor Red
         if (Test-Path $npmLog) {
