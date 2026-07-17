@@ -151,6 +151,13 @@ export default function (pi: ExtensionAPI) {
               name: m.name || m.id,
               reasoning: m.reasoning || false,
               input: m.input || ["text"],
+              cost: {
+                input: Number(m.cost?.input) || 0,
+                output: Number(m.cost?.output) || 0,
+                cacheRead: Number(m.cost?.cacheRead) || 0,
+                cacheWrite: Number(m.cost?.cacheWrite) || 0,
+                tiers: Array.isArray(m.cost?.tiers) ? m.cost.tiers : [],
+              },
               contextWindow: m.contextWindow || 128000,
               maxTokens: m.maxTokens || 4096,
             })),
