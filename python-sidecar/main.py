@@ -195,6 +195,30 @@ async def analyze_data(
     )
 
 
+@app.post("/api/tools/data-analysis/preview")
+async def preview_data(
+    file: UploadFile = File(...),
+    input_format: str = Form("auto"),
+    header_row: int = Form(1),
+    sheet_name: str = Form(""),
+    template: UploadFile | None = File(None),
+):
+    """执行前识别字段、空值，并检查输入字段与输出模板是否匹配。"""
+    content = await file.read()
+    template_content = await template.read() if template is not None else None
+    try:
+        return data_analysis.preview_excel_data(
+            content,
+            file.filename or "upload.xlsx",
+            input_format=input_format,
+            header_row=header_row,
+            sheet_name=sheet_name,
+            template_data=template_content,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"检查失败：{e}")
+
+
 @app.get("/api/tools/hs-code")
 async def query_hs_code(q: str = Query(..., description="HS 编码或品名关键词")):
     """HS 编码查询：输入编码或品名 → 返回匹配的 HS 编码条目。

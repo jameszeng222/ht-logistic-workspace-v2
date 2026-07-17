@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock3,
+  FileCheck2,
   FileOutput,
   FileSearch,
   FileSpreadsheet,
@@ -18,8 +19,10 @@ import {
   PackageCheck,
   Play,
   RotateCcw,
+  Save,
   Search,
   Sparkles,
+  Trash2,
   Upload,
   Wrench,
   X,
@@ -48,7 +51,7 @@ interface RecentOutput {
 }
 
 interface ToolsPanelProps {
-  onSendToAssistant?: (message: string) => void;
+  onSendToAssistant?: (message: string, attachmentPath?: string) => void;
   onClose?: () => void;
   onToolOutput?: (path: string, toolName: string) => void;
   onToolsChange?: (tools: ToolDef[]) => void;
@@ -65,6 +68,58 @@ export interface ToolsPanelHandle {
 type FileInput = Exclude<ToolDef["input"], "text">;
 type AnalysisInputFormat = "auto" | "excel" | "csv";
 type AnalysisOutputFormat = "report" | "xlsx" | "csv";
+
+interface AnalysisPreset {
+  id: string;
+  name: string;
+  inputFormat: AnalysisInputFormat;
+  outputFormat: AnalysisOutputFormat;
+  headerRow: number;
+  sheetName: string;
+  templatePath: string | null;
+}
+
+interface AnalysisColumnPreview {
+  name: string;
+  dtype: string;
+  kind: string;
+  missing: number;
+  missing_pct: number;
+  unique: number;
+}
+
+interface AnalysisPreview {
+  summary: string;
+  shape: [number, number];
+  columns: AnalysisColumnPreview[];
+  template_match?: {
+    header_row: number;
+    headers: string[];
+    matched: string[];
+    missing: string[];
+    match_rate: number;
+  } | null;
+}
+
+const ANALYSIS_PRESETS_KEY = "ht-analysis-presets";
+
+function loadAnalysisPresets(): AnalysisPreset[] {
+  try {
+    const stored = JSON.parse(localStorage.getItem(ANALYSIS_PRESETS_KEY) || "[]");
+    if (!Array.isArray(stored)) return [];
+    return stored.filter((item): item is AnalysisPreset => (
+      typeof item?.id === "string"
+      && typeof item?.name === "string"
+      && ["auto", "excel", "csv"].includes(item?.inputFormat)
+      && ["report", "xlsx", "csv"].includes(item?.outputFormat)
+      && typeof item?.headerRow === "number"
+      && typeof item?.sheetName === "string"
+      && (typeof item?.templatePath === "string" || item?.templatePath === null)
+    ));
+  } catch {
+    return [];
+  }
+}
 
 const INPUT_FILTERS: Record<FileInput, { name: string; extensions: string[] }[]> = {
   excel: [{ name: "Excel / CSV", extensions: ["xlsx", "xls", "csv"] }],
@@ -144,6 +199,13 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
   const [analysisHeaderRow, setAnalysisHeaderRow] = useState(1);
   const [analysisSheetName, setAnalysisSheetName] = useState("");
   const [analysisTemplatePath, setAnalysisTemplatePath] = useState<string | null>(null);
+  const [analysisPresets, setAnalysisPresets] = useState<AnalysisPreset[]>(loadAnalysisPresets);
+  const [activeAnalysisPresetId, setActiveAnalysisPresetId] = useState("");
+  const [analysisPresetName, setAnalysisPresetName] = useState("");
+  const [showAnalysisPresetEditor, setShowAnalysisPresetEditor] = useState(false);
+  const [analysisPreview, setAnalysisPreview] = useState<AnalysisPreview | null>(null);
+  const [analysisPreviewError, setAnalysisPreviewError] = useState<string | null>(null);
+  const [analysisInspecting, setAnalysisInspecting] = useState(false);
   const lastReviewRef = useRef<{ key: string; time: number }>({ key: "", time: 0 });
 
   const visibleTools = useMemo(() => [...tools].sort((a, b) => {
@@ -167,6 +229,11 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
   const hasInput = activeTool?.input === "text" ? query.trim().length > 0 : Boolean(filePath);
   const hasResult = Boolean(savedPath || jsonResult);
 
+  const invalidateAnalysisPreview = useCallback(() => {
+    setAnalysisPreview(null);
+    setAnalysisPreviewError(null);
+  }, []);
+
   const clearExecution = useCallback((clearInput = true) => {
     if (clearInput) {
       setFilePath(null);
@@ -175,7 +242,8 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
     setSavedPath(null);
     setJsonResult(null);
     setError(null);
-  }, []);
+    if (clearInput) invalidateAnalysisPreview();
+  }, [invalidateAnalysisPreview]);
 
   const selectActiveTool = useCallback((tool: ToolDef) => {
     setActiveTool(tool);
@@ -191,7 +259,10 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
     lastReviewRef.current = { key: reviewKey, time: now };
     const inputLine = activeTool.input === "text" ? `查询条件：${query.trim()}` : `输入文件：${filePath || "未记录"}`;
     const resultLine = savedPath ? `输出文件：${savedPath}` : `工具返回结果：\n${(jsonResult || "").slice(0, 12000)}`;
-    onSendToAssistant(`我刚用「${activeTool.name}」执行了物流工具。\n${inputLine}\n${resultLine}\n请检查结果、指出风险，并给出下一步建议。`);
+    onSendToAssistant(
+      `我刚用「${activeTool.name}」执行了物流工具。\n${inputLine}\n${resultLine}\n请检查结果、指出风险，并给出下一步建议。`,
+      savedPath || undefined,
+    );
   }, [activeTool, filePath, jsonResult, onSendToAssistant, query, savedPath]);
 
   const refreshTools = useCallback(async () => {
@@ -265,13 +336,14 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
       if (matched) setActiveTool(matched);
       setFilePath(normalized);
       setQuery("");
+      invalidateAnalysisPreview();
       clearExecution(false);
     },
     selectTool: (id) => {
       const matched = tools.find((tool) => tool.id === id);
       if (matched) selectActiveTool(matched);
     },
-  }), [clearExecution, selectActiveTool, tools]);
+  }), [clearExecution, invalidateAnalysisPreview, selectActiveTool, tools]);
 
   useEffect(() => { onToolsChange?.(tools); }, [onToolsChange, tools]);
   useEffect(() => { onActiveToolChange?.(activeTool); }, [activeTool, onActiveToolChange]);
@@ -288,20 +360,106 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
             : INPUT_FILTERS.excel
         : INPUT_FILTERS[activeTool.input];
       const selected = await openDialog({ multiple: false, filters });
-      if (typeof selected === "string" && selected) setFilePath(selected);
+      if (typeof selected === "string" && selected) {
+        setFilePath(selected);
+        invalidateAnalysisPreview();
+      }
     } catch (e) {
       setError(`选文件失败：${e}`);
     }
-  }, [activeTool, analysisInputFormat, clearExecution]);
+  }, [activeTool, analysisInputFormat, clearExecution, invalidateAnalysisPreview]);
 
   const pickAnalysisTemplate = useCallback(async () => {
     try {
       const selected = await openDialog({ multiple: false, filters: [{ name: "Excel 模板", extensions: ["xlsx"] }] });
-      if (typeof selected === "string" && selected) setAnalysisTemplatePath(selected);
+      if (typeof selected === "string" && selected) {
+        setAnalysisTemplatePath(selected);
+        invalidateAnalysisPreview();
+      }
     } catch (e) {
       setError(`选择模板失败：${e}`);
     }
+  }, [invalidateAnalysisPreview]);
+
+  const persistAnalysisPresets = useCallback((next: AnalysisPreset[]) => {
+    setAnalysisPresets(next);
+    try { localStorage.setItem(ANALYSIS_PRESETS_KEY, JSON.stringify(next)); }
+    catch { /* 本次运行仍可继续使用。 */ }
   }, []);
+
+  const applyAnalysisPreset = useCallback((presetId: string) => {
+    setActiveAnalysisPresetId(presetId);
+    const preset = analysisPresets.find((item) => item.id === presetId);
+    if (!preset) return;
+    setAnalysisInputFormat(preset.inputFormat);
+    setAnalysisOutputFormat(preset.outputFormat);
+    setAnalysisHeaderRow(Math.max(1, preset.headerRow));
+    setAnalysisSheetName(preset.sheetName);
+    setAnalysisTemplatePath(preset.templatePath);
+    invalidateAnalysisPreview();
+    clearExecution(false);
+  }, [analysisPresets, clearExecution, invalidateAnalysisPreview]);
+
+  const saveAnalysisPreset = useCallback(() => {
+    const name = analysisPresetName.trim();
+    if (!name) return;
+    const id = activeAnalysisPresetId || `analysis-${Date.now()}`;
+    const nextPreset: AnalysisPreset = {
+      id,
+      name,
+      inputFormat: analysisInputFormat,
+      outputFormat: analysisOutputFormat,
+      headerRow: Math.max(1, analysisHeaderRow),
+      sheetName: analysisSheetName.trim(),
+      templatePath: analysisTemplatePath,
+    };
+    const next = activeAnalysisPresetId
+      ? analysisPresets.map((item) => item.id === activeAnalysisPresetId ? nextPreset : item)
+      : [...analysisPresets, nextPreset];
+    persistAnalysisPresets(next);
+    setActiveAnalysisPresetId(id);
+    setAnalysisPresetName(name);
+    setShowAnalysisPresetEditor(false);
+  }, [activeAnalysisPresetId, analysisHeaderRow, analysisInputFormat, analysisOutputFormat, analysisPresetName, analysisPresets, analysisSheetName, analysisTemplatePath, persistAnalysisPresets]);
+
+  const deleteAnalysisPreset = useCallback(() => {
+    if (!activeAnalysisPresetId) return;
+    persistAnalysisPresets(analysisPresets.filter((item) => item.id !== activeAnalysisPresetId));
+    setActiveAnalysisPresetId("");
+    setAnalysisPresetName("");
+    setShowAnalysisPresetEditor(false);
+  }, [activeAnalysisPresetId, analysisPresets, persistAnalysisPresets]);
+
+  const inspectAnalysisInput = useCallback(async () => {
+    if (!filePath || !sidecarReady) return;
+    setAnalysisInspecting(true);
+    setAnalysisPreviewError(null);
+    try {
+      const bytes = await readFile(filePath);
+      const fileName = filePath.split(/[\\/]/).pop() || "upload";
+      const formData = new FormData();
+      formData.append("file", new File([new Blob([bytes])], fileName), fileName);
+      formData.append("input_format", analysisInputFormat);
+      formData.append("header_row", String(Math.max(1, analysisHeaderRow)));
+      formData.append("sheet_name", analysisSheetName.trim());
+      if (analysisOutputFormat === "xlsx" && analysisTemplatePath) {
+        const templateBytes = await readFile(analysisTemplatePath);
+        const templateName = analysisTemplatePath.split(/[\\/]/).pop() || "template.xlsx";
+        formData.append("template", new File([new Blob([templateBytes])], templateName), templateName);
+      }
+      const resp = await fetch(`${sidecarUrl}/api/tools/data-analysis/preview`, { method: "POST", body: formData });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => null);
+        throw new Error(body?.detail || `HTTP ${resp.status}`);
+      }
+      setAnalysisPreview(await resp.json() as AnalysisPreview);
+    } catch (previewError) {
+      setAnalysisPreview(null);
+      setAnalysisPreviewError(String(previewError));
+    } finally {
+      setAnalysisInspecting(false);
+    }
+  }, [analysisHeaderRow, analysisInputFormat, analysisOutputFormat, analysisSheetName, analysisTemplatePath, filePath, sidecarReady, sidecarUrl]);
 
   const runTool = useCallback(async () => {
     if (!activeTool || !hasInput || !sidecarReady) return;
@@ -452,10 +610,16 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
                 </div>
               </div>
 
-              <div className="tool-workflow" aria-label="执行步骤">
+              <div className={`tool-workflow ${activeTool.id === "data-analysis" ? "four-steps" : ""}`} aria-label="执行步骤">
                 <div className="done"><span>1</span><div><strong>选择工具</strong><small>{activeTool.name}</small></div></div>
                 <div className={hasInput ? "done" : "current"}><span>2</span><div><strong>提供输入</strong><small>{activeTool.input === "text" ? "输入编码或品名" : "选择本地文件"}</small></div></div>
-                <div className={hasResult ? "done" : hasInput ? "current" : ""}><span>3</span><div><strong>执行与结果</strong><small>{hasResult ? "已生成结果" : "检查后执行"}</small></div></div>
+                {activeTool.id === "data-analysis" && (
+                  <div className={analysisPreview ? "done" : hasInput ? "current" : ""}><span>3</span><div><strong>检查数据</strong><small>{analysisPreview ? "结构已识别" : "预览字段与缺失"}</small></div></div>
+                )}
+                <div className={hasResult ? "done" : (activeTool.id === "data-analysis" ? analysisPreview : hasInput) ? "current" : ""}>
+                  <span>{activeTool.id === "data-analysis" ? 4 : 3}</span>
+                  <div><strong>执行与结果</strong><small>{hasResult ? "已生成结果" : "确认后执行"}</small></div>
+                </div>
               </div>
 
               <div className="tool-input-section">
@@ -489,6 +653,44 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
                   <>
                     {activeTool.id === "data-analysis" && (
                       <div className="analysis-config-panel">
+                        <div className="analysis-preset-row">
+                          <label>
+                            <span>配置方案</span>
+                            <select value={activeAnalysisPresetId} onChange={(event) => applyAnalysisPreset(event.target.value)}>
+                              <option value="">本次临时设置</option>
+                              {analysisPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+                            </select>
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const current = analysisPresets.find((item) => item.id === activeAnalysisPresetId);
+                              setAnalysisPresetName(current?.name || "");
+                              setShowAnalysisPresetEditor(true);
+                            }}
+                            title={activeAnalysisPresetId ? "更新当前方案" : "保存为客户或供应商方案"}
+                          >
+                            <Save size={14} />{activeAnalysisPresetId ? "更新" : "保存方案"}
+                          </button>
+                          {activeAnalysisPresetId && (
+                            <button type="button" className="analysis-preset-delete" onClick={deleteAnalysisPreset} title="删除当前方案" aria-label="删除当前分析方案">
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                        {showAnalysisPresetEditor && (
+                          <div className="analysis-preset-editor">
+                            <input
+                              value={analysisPresetName}
+                              onChange={(event) => setAnalysisPresetName(event.target.value)}
+                              onKeyDown={(event) => { if (event.key === "Enter") saveAnalysisPreset(); }}
+                              placeholder="例如：德国客户月报 / 万邑通费用表"
+                              autoFocus
+                            />
+                            <button type="button" onClick={() => setShowAnalysisPresetEditor(false)}>取消</button>
+                            <button type="button" className="primary" onClick={saveAnalysisPreset} disabled={!analysisPresetName.trim()}>保存</button>
+                          </div>
+                        )}
                         <div className="analysis-config-heading">
                           <strong>分析格式</strong>
                           <small>按源文件结构读取，并选择本次结果的交付方式</small>
@@ -496,7 +698,7 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
                         <div className="analysis-config-grid">
                           <label>
                             <span>输入格式</span>
-                            <select value={analysisInputFormat} onChange={(event) => { setAnalysisInputFormat(event.target.value as AnalysisInputFormat); clearExecution(false); }}>
+                            <select value={analysisInputFormat} onChange={(event) => { setAnalysisInputFormat(event.target.value as AnalysisInputFormat); invalidateAnalysisPreview(); clearExecution(false); }}>
                               <option value="auto">自动识别</option>
                               <option value="excel">Excel</option>
                               <option value="csv">CSV</option>
@@ -504,15 +706,15 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
                           </label>
                           <label>
                             <span>表头所在行</span>
-                            <input type="number" min="1" value={analysisHeaderRow} onChange={(event) => { setAnalysisHeaderRow(Math.max(1, Number(event.target.value) || 1)); clearExecution(false); }} />
+                            <input type="number" min="1" value={analysisHeaderRow} onChange={(event) => { setAnalysisHeaderRow(Math.max(1, Number(event.target.value) || 1)); invalidateAnalysisPreview(); clearExecution(false); }} />
                           </label>
                           <label>
                             <span>工作表</span>
-                            <input value={analysisSheetName} disabled={analysisInputFormat === "csv"} onChange={(event) => { setAnalysisSheetName(event.target.value); clearExecution(false); }} placeholder="默认第一个" />
+                            <input value={analysisSheetName} disabled={analysisInputFormat === "csv"} onChange={(event) => { setAnalysisSheetName(event.target.value); invalidateAnalysisPreview(); clearExecution(false); }} placeholder="默认第一个" />
                           </label>
                           <label>
                             <span>输出方式</span>
-                            <select value={analysisOutputFormat} onChange={(event) => { setAnalysisOutputFormat(event.target.value as AnalysisOutputFormat); clearExecution(false); }}>
+                            <select value={analysisOutputFormat} onChange={(event) => { setAnalysisOutputFormat(event.target.value as AnalysisOutputFormat); invalidateAnalysisPreview(); clearExecution(false); }}>
                               <option value="report">在线分析报告</option>
                               <option value="xlsx">Excel 文件</option>
                               <option value="csv">CSV 文件</option>
@@ -523,7 +725,7 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
                           <div className="analysis-template-row">
                             <button type="button" onClick={pickAnalysisTemplate}><FileSpreadsheet size={15} />{analysisTemplatePath ? "更换输出模板" : "选择输出模板"}</button>
                             <span title={analysisTemplatePath || ""}>{analysisTemplatePath ? analysisTemplatePath.split(/[\\/]/).pop() : "可选；按模板表头写入并保留样式"}</span>
-                            {analysisTemplatePath && <button type="button" className="analysis-template-clear" onClick={() => setAnalysisTemplatePath(null)} title="移除模板"><X size={14} /></button>}
+                            {analysisTemplatePath && <button type="button" className="analysis-template-clear" onClick={() => { setAnalysisTemplatePath(null); invalidateAnalysisPreview(); }} title="移除模板"><X size={14} /></button>}
                           </div>
                         )}
                       </div>
@@ -546,14 +748,56 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
                       <div className="tool-recent-files">
                         <span><Clock3 size={13} />最近使用</span>
                         <div>{compatibleRecentFiles.map((path) => (
-                          <button key={path} onClick={() => { setFilePath(path); clearExecution(false); }} title={path}>{path.split(/[\\/]/).pop()}</button>
+                          <button key={path} onClick={() => { setFilePath(path); invalidateAnalysisPreview(); clearExecution(false); }} title={path}>{path.split(/[\\/]/).pop()}</button>
                         ))}</div>
                       </div>
                     )}
+                    {activeTool.id === "data-analysis" && filePath && (
+                      <div className={`analysis-preflight ${analysisPreview ? "ready" : ""} ${analysisPreviewError ? "error" : ""}`}>
+                        <div className="analysis-preflight-header">
+                          <span className="analysis-preflight-icon"><FileCheck2 size={17} /></span>
+                          <span>
+                            <strong>执行前检查</strong>
+                            <small>{analysisPreview ? "已识别数据结构，可以继续执行" : "先确认字段、缺失值和模板匹配情况"}</small>
+                          </span>
+                          <button type="button" onClick={inspectAnalysisInput} disabled={analysisInspecting || !sidecarReady}>
+                            {analysisInspecting ? <LoaderCircle className="spin" size={14} /> : <FileCheck2 size={14} />}
+                            {analysisInspecting ? "检查中" : analysisPreview ? "重新检查" : "检查数据"}
+                          </button>
+                        </div>
+                        {analysisPreviewError && <div className="analysis-preflight-error">{analysisPreviewError}</div>}
+                        {analysisPreview && (
+                          <>
+                            <div className="analysis-preflight-metrics">
+                              <span><strong>{analysisPreview.shape?.[0] ?? 0}</strong><small>数据行</small></span>
+                              <span><strong>{analysisPreview.shape?.[1] ?? analysisPreview.columns.length}</strong><small>字段</small></span>
+                              <span><strong>{analysisPreview.columns.filter((column) => column.missing > 0).length}</strong><small>含空值字段</small></span>
+                              {analysisPreview.template_match && (
+                                <span><strong>{analysisPreview.template_match.matched.length}/{analysisPreview.template_match.headers.length}</strong><small>模板匹配</small></span>
+                              )}
+                            </div>
+                            <div className="analysis-preflight-columns">
+                              {analysisPreview.columns.slice(0, 8).map((column) => (
+                                <span key={column.name} className={column.missing > 0 ? "warning" : ""} title={`${column.name} · ${column.kind}`}>
+                                  {column.name}{column.missing > 0 ? ` · 空 ${column.missing_pct}%` : ""}
+                                </span>
+                              ))}
+                              {analysisPreview.columns.length > 8 && <small>另有 {analysisPreview.columns.length - 8} 个字段</small>}
+                            </div>
+                            {analysisPreview.template_match && analysisPreview.template_match.missing.length > 0 && (
+                              <div className="analysis-template-warning">
+                                模板中有 {analysisPreview.template_match.missing.length} 个字段未匹配：{analysisPreview.template_match.missing.slice(0, 5).join("、")}
+                                {analysisPreview.template_match.missing.length > 5 ? "…" : ""}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
                     <div className="tool-actions">
-                      <button className="btn-primary" onClick={runTool} disabled={!hasInput || running || !sidecarReady}>
+                      <button className="btn-primary" onClick={runTool} disabled={!hasInput || running || !sidecarReady || (activeTool.id === "data-analysis" && !analysisPreview)}>
                         {running ? <LoaderCircle className="spin" size={16} /> : <Play size={16} />}
-                        {running ? "执行中" : "执行工具"}
+                        {running ? "执行中" : activeTool.id === "data-analysis" && !analysisPreview ? "先检查数据" : "执行工具"}
                       </button>
                     </div>
                   </>

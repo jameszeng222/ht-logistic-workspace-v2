@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { Check } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUp, Check, Folder, RotateCcw } from "lucide-react";
 
 interface DirEntry {
   name: string;
@@ -429,34 +429,42 @@ export function FileBrowser({
             onClick={goBack}
             disabled={historyIdx <= 0}
             title="后退"
-          >‹</button>
+            aria-label="后退"
+          ><ArrowLeft size={14} /></button>
           <button
             className="fb-nav-btn"
             onClick={goForward}
             disabled={historyIdx >= history.length - 1}
             title="前进"
-          >›</button>
+            aria-label="前进"
+          ><ArrowRight size={14} /></button>
           <button
             className="fb-nav-btn"
             onClick={goUp}
             disabled={!currentPath}
             title="上一级"
-          >↑</button>
+            aria-label="上一级"
+          ><ArrowUp size={14} /></button>
           <button
             className="fb-nav-btn"
             onClick={() => navigateTo(currentPath, true)}
             disabled={loading}
             title="刷新"
-          >↻</button>
+            aria-label="刷新"
+          ><RotateCcw size={14} /></button>
         </div>
-        <input
-          ref={pathInputRef}
-          className="fb-path-input"
-          defaultValue={currentPath}
-          key={currentPath}
-          onKeyDown={(e) => { if (e.key === "Enter") handlePathSubmit(); }}
-          placeholder="输入路径..."
-        />
+        <div className="fb-path-field">
+          <Folder size={13} aria-hidden="true" />
+          <input
+            ref={pathInputRef}
+            className="fb-path-input"
+            defaultValue={currentPath}
+            key={currentPath}
+            onKeyDown={(e) => { if (e.key === "Enter") handlePathSubmit(); }}
+            placeholder="输入路径..."
+            aria-label="当前文件路径"
+          />
+        </div>
       </div>
 
       {/* 面包屑 */}

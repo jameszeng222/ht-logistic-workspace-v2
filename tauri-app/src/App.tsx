@@ -1385,10 +1385,11 @@ export default function App() {
     }, 0);
   }, []);
 
-  const send = async (text?: string) => {
+  const send = async (text?: string, attachmentOverride?: string[]) => {
     const rawMsg = (text ?? input).trim();
+    const activeAttachments = attachmentOverride ?? attachments;
     // 支持只发附件：文本为空但有附件时，用默认文案发送
-    if (!rawMsg && attachments.length === 0) return;
+    if (!rawMsg && activeAttachments.length === 0) return;
     if (busy) { toast("Pilot 思考中，请等待当前任务完成或中断后再发送", "info"); return; }
     if (!ready) { toast("Pilot 未连接，请稍候", "info"); return; }
     // 预览模式下若 pi 正忙，提示用户：续聊需要重启 pi 会中断当前输出
@@ -1443,8 +1444,8 @@ export default function App() {
     // 文本为空但有附件时，用默认文案让 AI 知道用户意图是分析附件
     const userText = rawMsg || "请分析这些附件文件。";
     let finalMsg = userText;
-    if (attachments.length > 0) {
-      const attachList = attachments.map((p) => {
+    if (activeAttachments.length > 0) {
+      const attachList = activeAttachments.map((p) => {
         const name = p.split(/[\\/]/).pop() || p;
         return `- ${p}（${name}）`;
       }).join("\n");
@@ -1604,7 +1605,7 @@ export default function App() {
       <header className="header">
         <div className="app-brand">
           <span className="app-brand-mark">HT</span>
-          <span className="app-brand-copy"><strong>Logistic</strong><small>Workspace</small></span>
+          <span className="app-brand-copy"><strong>Logistic</strong><span>Workspace</span></span>
         </div>
         <span className={`header-status ${ready ? (busy ? "busy" : "ready") : "error"}`}>
           <span className="dot" />
@@ -2292,7 +2293,11 @@ export default function App() {
           <section className={`tool-workbench ${workspaceView === "tool" ? "active" : ""}`}>
             <ToolsPanel
               ref={toolsPanelRef}
-              onSendToAssistant={(message) => { setWorkspaceView("assistant"); setContextPanelTab("files"); send(message); }}
+              onSendToAssistant={(message, attachmentPath) => {
+                setWorkspaceView("assistant");
+                setContextPanelTab("files");
+                send(message, attachmentPath ? [attachmentPath] : undefined);
+              }}
               onClose={() => setWorkspaceView("assistant")}
               onToolOutput={addToolOutput}
               onToolsChange={setToolsList}

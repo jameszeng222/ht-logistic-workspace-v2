@@ -111,6 +111,41 @@ def analyze_excel_data(
     }
 
 
+def preview_excel_data(
+    data: bytes,
+    file_name: str = "upload",
+    input_format: str = "auto",
+    header_row: int = 1,
+    sheet_name: str = "",
+    template_data: bytes | None = None,
+) -> dict[str, Any]:
+    """执行前预览数据结构，并在有输出模板时检查字段匹配。"""
+    report = analyze_excel_data(data, file_name, input_format, header_row, sheet_name)
+    if not template_data:
+        report["template_match"] = None
+        return report
+
+    workbook = load_workbook(io.BytesIO(template_data), read_only=True, data_only=True)
+    _, template_header_row, header_values = _find_template_header(workbook)
+    workbook.close()
+    template_headers = [
+        str(header).strip()
+        for header in header_values
+        if header is not None and str(header).strip()
+    ]
+    source_headers = {str(column["name"]).strip() for column in report["columns"]}
+    matched = [header for header in template_headers if header in source_headers]
+    missing = [header for header in template_headers if header not in source_headers]
+    report["template_match"] = {
+        "header_row": template_header_row,
+        "headers": template_headers,
+        "matched": matched,
+        "missing": missing,
+        "match_rate": round(len(matched) / len(template_headers) * 100, 2) if template_headers else 0.0,
+    }
+    return report
+
+
 def export_data(
     data: bytes,
     file_name: str = "upload",
@@ -134,16 +169,7 @@ def export_data(
         return output.getvalue()
 
     workbook = load_workbook(io.BytesIO(template_data))
-    worksheet = workbook.active
-    header_candidates = []
-    for row_index in range(1, min(worksheet.max_row, 20) + 1):
-        values = [worksheet.cell(row_index, column).value for column in range(1, worksheet.max_column + 1)]
-        count = sum(bool(value is not None and str(value).strip()) for value in values)
-        if count:
-            header_candidates.append((count, row_index, values))
-    if not header_candidates:
-        raise ValueError("输出模板中没有找到表头")
-    _, template_header_row, header_values = max(header_candidates, key=lambda item: (item[0], -item[1]))
+    worksheet, template_header_row, header_values = _find_template_header(workbook)
     source_columns = {str(column).strip(): column for column in df.columns}
     mappings = [
         (column_index, source_columns[str(header).strip()])
@@ -167,6 +193,22 @@ def export_data(
 
 
 # ============ 内部 ============
+
+
+def _find_template_header(workbook):
+    """返回模板工作表、最可能的表头行号和该行内容。"""
+    worksheet = workbook.active
+    header_candidates = []
+    for row_index in range(1, min(worksheet.max_row, 20) + 1):
+        values = [worksheet.cell(row_index, column).value for column in range(1, worksheet.max_column + 1)]
+        count = sum(bool(value is not None and str(value).strip()) for value in values)
+        if count:
+            header_candidates.append((count, row_index, values))
+    if not header_candidates:
+        raise ValueError("输出模板中没有找到表头")
+    _, header_row, header_values = max(header_candidates, key=lambda item: (item[0], -item[1]))
+    return worksheet, header_row, header_values
+
 
 def _read_data(
     data: bytes,
