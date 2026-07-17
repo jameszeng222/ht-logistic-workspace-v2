@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { rebuildTurnsFromMessages, extractTextFromContent } from "./utils";
+import { rebuildTurnsFromMessages, extractAssistantMessageContent, extractTextFromContent, formatPiError } from "./utils";
 
 describe("extractTextFromContent", () => {
   it("字符串直接返回", () => {
@@ -19,6 +19,22 @@ describe("extractTextFromContent", () => {
   });
   it("忽略非 text 块", () => {
     expect(extractTextFromContent([{ type: "image", url: "x" }])).toBe("");
+  });
+});
+
+describe("assistant stream helpers", () => {
+  it("从最终消息恢复完整文本、思考和错误", () => {
+    expect(extractAssistantMessageContent({
+      content: [
+        { type: "thinking", thinking: "分析" },
+        { type: "text", text: "结论" },
+      ],
+      errorMessage: "provider failed",
+    })).toEqual({ text: "结论", thinking: "分析", error: "provider failed" });
+  });
+
+  it("把 tiers 配置错误转换成可操作提示", () => {
+    expect(formatPiError("Cannot read properties of undefined (reading 'tiers')")).toContain("自动修复");
   });
 });
 
@@ -60,6 +76,22 @@ describe("rebuildTurnsFromMessages", () => {
     const am = rebuildTurnsFromMessages(msgs)[0].assistantMsgs[0];
     expect(am.thinking).toBe("想考");
     expect(am.text).toBe("答");
+  });
+
+  it("历史错误消息保留已输出内容并标记中断", () => {
+    const turns = rebuildTurnsFromMessages([
+      { role: "user", content: "q", timestamp: 1 },
+      {
+        role: "assistant",
+        id: "a",
+        timestamp: 2,
+        stopReason: "error",
+        errorMessage: "Cannot read properties of undefined (reading 'tiers')",
+        content: [{ type: "text", text: "半截回答" }],
+      },
+    ]);
+    expect(turns[0].assistantMsgs[0].text).toBe("半截回答");
+    expect(turns[0].assistantMsgs[0].error).toContain("自动修复");
   });
 
   it("toolCall 块与 toolResult 关联", () => {

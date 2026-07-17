@@ -88,6 +88,9 @@ export function rebuildTurnsFromMessages(messages: any[]): Turn[] {
           am.toolCallIds.push(block.id);
         }
       }
+      if (msg.stopReason === "error" || msg.stopReason === "aborted") {
+        am.error = formatPiError(typeof msg.errorMessage === "string" ? msg.errorMessage : "回答意外中断，请重试。");
+      }
       currentTurn.assistantMsgs.push(am);
       currentAssistantMsg = am;
     } else if (msg.role === "toolResult") {
@@ -126,4 +129,25 @@ export function extractTextFromContent(content: any): string {
     .filter((c: any) => c && c.type === "text" && typeof c.text === "string")
     .map((c: any) => c.text)
     .join("");
+}
+
+export function extractAssistantMessageContent(message: any): { text: string; thinking: string; error?: string } {
+  const content = Array.isArray(message?.content) ? message.content : [];
+  const text = content
+    .filter((block: any) => block?.type === "text" && typeof block.text === "string")
+    .map((block: any) => block.text)
+    .join("");
+  const thinking = content
+    .filter((block: any) => block?.type === "thinking")
+    .map((block: any) => typeof block.thinking === "string" ? block.thinking : (typeof block.text === "string" ? block.text : ""))
+    .join("");
+  const rawError = typeof message?.errorMessage === "string" ? message.errorMessage.trim() : "";
+  return { text, thinking, error: rawError || undefined };
+}
+
+export function formatPiError(error: string): string {
+  if (error.includes("reading 'tiers'") || error.includes('reading "tiers"')) {
+    return "模型配置缺少用量信息，应用已自动修复。请重新发送这条消息。";
+  }
+  return error || "回答意外中断，请重试。";
 }

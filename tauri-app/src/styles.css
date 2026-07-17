@@ -849,6 +849,21 @@ body {
   padding: 2px 0;
 }
 .msg.assistant.streaming .assistant-bubble { border-color: var(--border-strong); }
+.assistant-message-error {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: var(--space-2);
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  color: var(--danger);
+  font-size: var(--text-xs);
+}
+.assistant-message-error span { font-weight: 600; }
+.assistant-message-error small { color: var(--fg-muted); line-height: 1.45; }
 
 /* 流式光标 */
 .cursor {
@@ -2077,20 +2092,6 @@ body {
   color: var(--fg-muted);
   margin-top: 1px;
 }
-.sidecar-status {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-xs);
-  padding: 4px 10px;
-  border-radius: var(--radius-full);
-  background: transparent;
-  border: 1px solid var(--border-subtle);
-  color: var(--fg-muted);
-}
-.sidecar-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-subtle); }
-.sidecar-status.ready .dot { background: var(--success); box-shadow: 0 0 8px var(--success); }
-.sidecar-status.error .dot { background: var(--danger); }
 .tools-banner {
   padding: var(--space-2) var(--space-4);
   font-size: var(--text-xs);
@@ -4008,24 +4009,6 @@ body {
 }
 
 .tools-page-header p { margin: 3px 0 0; color: var(--fg-muted); font-size: 11px; }
-.tools-page-actions { display: flex; align-items: center; gap: 8px; }
-.tools-page-actions .sidecar-status { height: 32px; padding: 0 10px; border-radius: 6px; }
-.tools-page-actions .sidecar-status.ready { color: var(--success); }
-
-.tools-close-button {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  background: #ffffff;
-  color: var(--fg-muted);
-  cursor: pointer;
-}
-.tools-close-button:hover { border-color: var(--border-strong); color: var(--fg); }
-
 .tool-page > .tools-banner { border-bottom: 1px solid color-mix(in srgb, var(--danger) 20%, transparent); }
 
 .tool-view .tools-body {
@@ -4597,9 +4580,6 @@ body {
 }
 
 .tools-page-header { min-height: 76px; }
-.tools-page-actions .sidecar-status,
-.tools-close-button { border: 0; background: #f4f7f5; }
-
 .tool-workflow {
   gap: 4px;
   padding: 11px;

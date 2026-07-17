@@ -17,7 +17,7 @@ import type { PiEvent } from "./pi-client";
 import { Markdown } from "./Markdown";
 import { CommandPalette } from "./CommandPalette";
 import { ExtensionManager } from "./ExtensionManager";
-import { rebuildTurnsFromMessages, isTutorialWelcome } from "./utils";
+import { extractAssistantMessageContent, formatPiError, rebuildTurnsFromMessages, isTutorialWelcome } from "./utils";
 import { ChartView, extractChartConfig } from "./Chart";
 import { ToolsPanel, type ToolsPanelHandle, type ToolDef } from "./ToolsPanel";
 import { FileBrowser } from "./FileBrowser";
@@ -503,26 +503,26 @@ export default function App() {
   }, [systemPrompt, systemPromptPath, toast, refreshState]);
 
   // ====== 流式节流 ======
+  const applyPendingDeltas = useCallback((turnList: Turn[]) => {
+    const textUpdates = new Map(pendingTextRef.current);
+    const thinkUpdates = new Map(pendingThinkingRef.current);
+    pendingTextRef.current.clear();
+    pendingThinkingRef.current.clear();
+    if (textUpdates.size === 0 && thinkUpdates.size === 0) return turnList;
+    return turnList.map((turn) => ({
+      ...turn,
+      assistantMsgs: turn.assistantMsgs.map((message) => ({
+        ...message,
+        text: message.text + (textUpdates.get(message.id) || ""),
+        thinking: (message.thinking || "") + (thinkUpdates.get(message.id) || "") || undefined,
+      })),
+    }));
+  }, []);
+
   const flushText = useCallback(() => {
     rafRef.current = null;
-    const pending = pendingTextRef.current;
-    const pendingThink = pendingThinkingRef.current;
-    if (pending.size === 0 && pendingThink.size === 0) return;
-    const textUpdates = Array.from(pending.entries());
-    const thinkUpdates = Array.from(pendingThink.entries());
-    pending.clear(); pendingThink.clear();
-    setTurns((prev) => prev.map((t) => ({
-      ...t,
-      assistantMsgs: t.assistantMsgs.map((m) => {
-        let next = m;
-        const txt = textUpdates.find(([id]) => id === m.id);
-        if (txt) next = { ...next, text: next.text + txt[1] };
-        const think = thinkUpdates.find(([id]) => id === m.id);
-        if (think) next = { ...next, thinking: (next.thinking || "") + think[1] };
-        return next;
-      }),
-    })));
-  }, []);
+    setTurns((prev) => applyPendingDeltas(prev));
+  }, [applyPendingDeltas]);
 
   const appendText = useCallback((msgId: string, delta: string) => {
     pendingTextRef.current.set(msgId, (pendingTextRef.current.get(msgId) || "") + delta);
@@ -533,6 +533,58 @@ export default function App() {
     pendingThinkingRef.current.set(msgId, (pendingThinkingRef.current.get(msgId) || "") + delta);
     if (rafRef.current == null) rafRef.current = requestAnimationFrame(flushText);
   }, [flushText]);
+
+  const finishAssistantMessage = useCallback((message: any, explicitError?: string) => {
+    const turnId = currentTurnId.current;
+    if (!turnId) return;
+    const activeMsgId = currentMsgId.current;
+    const msgId = message?.id || activeMsgId || "msg-" + Date.now();
+    const finalContent = extractAssistantMessageContent(message);
+    const rawError = explicitError || finalContent.error || (message?.stopReason === "error" ? "回答意外中断，请重试。" : "");
+    const displayError = rawError ? formatPiError(rawError) : undefined;
+
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    setTurns((prev) => applyPendingDeltas(prev).map((turn) => {
+      if (turn.id !== turnId) return turn;
+      let found = false;
+      const assistantMsgs = turn.assistantMsgs.map((item) => {
+        if (item.id !== msgId && item.id !== activeMsgId) return item;
+        found = true;
+        return {
+          ...item,
+          text: finalContent.text || item.text,
+          thinking: finalContent.thinking || item.thinking,
+          error: displayError,
+          streaming: false,
+        };
+      });
+      if (!found) {
+        assistantMsgs.push({
+          id: msgId,
+          text: finalContent.text,
+          thinking: finalContent.thinking || undefined,
+          error: displayError,
+          streaming: false,
+          toolCallIds: [],
+        });
+      }
+      return { ...turn, assistantMsgs, status: displayError ? "done" : turn.status };
+    }));
+    currentMsgId.current = null;
+
+    if (displayError) {
+      setBusy(false);
+      currentTurnId.current = null;
+      toast(displayError, "error");
+      refreshState();
+      refreshStats();
+      refreshSessions();
+      addLog("event", "assistant_error · " + rawError);
+    }
+  }, [addLog, applyPendingDeltas, refreshSessions, refreshState, refreshStats, toast]);
 
   // ====== 自动命名会话 ======
   // Pi 默认会话显示名是"首条用户消息"。但若用户没主动 set_session_name，
@@ -569,8 +621,11 @@ export default function App() {
       case "agent_end":
         setBusy(false);
         setTurns((prev) => {
+          const flushed = applyPendingDeltas(prev);
           // 先把所有 streaming 标记为 done
-          let next = prev.map((t) => t.status === "streaming" ? { ...t, status: "done" as const } : t);
+          let next = flushed.map((t) => t.status === "streaming"
+            ? { ...t, status: "done" as const, assistantMsgs: t.assistantMsgs.map((message) => ({ ...message, streaming: false })) }
+            : t);
           // 过滤 Pi 输出的教程欢迎语（命中教程签名即过滤，不要求 userMessage 为空，
           // 因为 Pi 会把教程当首条消息的回复输出）。
           next = next.filter((t) => {
@@ -579,7 +634,7 @@ export default function App() {
           });
           return next;
         });
-        if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; flushText(); }
+        if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
         currentTurnId.current = null; currentMsgId.current = null;
         // agent_end 后刷新状态 & 统计 & 自动命名 & 刷新会话列表
         refreshState(); refreshStats();
@@ -605,15 +660,16 @@ export default function App() {
           if (currentMsgId.current) appendText(currentMsgId.current, d.delta);
         } else if (d?.type === "thinking_delta" && typeof d.delta === "string") {
           if (currentMsgId.current) appendThinking(currentMsgId.current, d.delta);
+        } else if (d?.type === "error") {
+          finishAssistantMessage(d.error, d.error?.errorMessage || d.reason);
         }
         break;
       }
-      case "message_end":
-        const mid = currentMsgId.current;
-        setTurns((prev) => prev.map((t) => ({
-          ...t, assistantMsgs: t.assistantMsgs.map((m) => m.id === mid ? { ...m, streaming: false } : m),
-        })));
+      case "message_end": {
+        const message = (ev as any).message;
+        if (message?.role === "assistant") finishAssistantMessage(message);
         break;
+      }
       case "tool_execution_start":
         const tc: ToolCall = { id: ev.toolCallId, name: ev.toolName, args: ev.args, status: "running" };
         setTurns((prev) => prev.map((t) =>
@@ -643,6 +699,20 @@ export default function App() {
         break;
       case "pi_process_exit":
         setReady(false); setBusy(false);
+        if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+        setTurns((prev) => applyPendingDeltas(prev).map((turn) => turn.status === "streaming"
+          ? {
+              ...turn,
+              status: "done" as const,
+              assistantMsgs: turn.assistantMsgs.map((message, index, list) => ({
+                ...message,
+                streaming: false,
+                error: index === list.length - 1 ? "Pi 服务意外退出，请重新发送这条消息。" : message.error,
+              })),
+            }
+          : turn));
+        currentTurnId.current = null;
+        currentMsgId.current = null;
         toast("Pi 进程退出", "error");
         addLog("event", "pi_process_exit · 进程退出");
         break;
@@ -651,7 +721,7 @@ export default function App() {
         addLog("event", `unknown · ${(ev as any).type} · ${JSON.stringify(ev).slice(0, 200)}`);
         break;
     }
-  }, [appendText, appendThinking, flushText, toast, refreshState, refreshStats, addLog, autoNameSession, refreshSessions]);
+  }, [appendText, appendThinking, applyPendingDeltas, finishAssistantMessage, toast, refreshState, refreshStats, addLog, autoNameSession, refreshSessions]);
 
   // ====== Extension UI Modal ======
   const [uiRequest, setUiRequest] = useState<any>(null);
@@ -2100,6 +2170,12 @@ export default function App() {
                         <div className="msg-bubble assistant-bubble">
                           <Markdown content={msg.text} streaming={msg.streaming} />
                         </div>
+                        {msg.error && (
+                          <div className="assistant-message-error" role="status">
+                            <span>本次回答已中断</span>
+                            <small>{msg.error}</small>
+                          </div>
+                        )}
                         {msg.toolCallIds.length > 0 && (
                           <div className="tool-list">
                             {msg.toolCallIds.map((tcId) => {
@@ -2298,7 +2374,6 @@ export default function App() {
                 setContextPanelTab("files");
                 send(message, attachmentPath ? [attachmentPath] : undefined);
               }}
-              onClose={() => setWorkspaceView("assistant")}
               onToolOutput={addToolOutput}
               onToolsChange={setToolsList}
               onActiveToolChange={setActiveToolMirrored}

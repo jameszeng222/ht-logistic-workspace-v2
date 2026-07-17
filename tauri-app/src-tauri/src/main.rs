@@ -1065,6 +1065,51 @@ fn get_models_json_path() -> Result<std::path::PathBuf, String> {
     Ok(agent.join("models.json"))
 }
 
+/// Pi 0.80.7 在回答结束计算用量时会直接读取 model.cost.tiers。
+/// 旧版工作台创建的自定义模型没有 cost，导致回答已经生成后仍在收尾阶段报错。
+fn normalize_models_config(config: &mut serde_json::Value) -> bool {
+    let Some(providers) = config.get_mut("providers").and_then(|value| value.as_object_mut()) else {
+        return false;
+    };
+    let mut changed = false;
+    for provider in providers.values_mut() {
+        let Some(models) = provider.get_mut("models").and_then(|value| value.as_array_mut()) else {
+            continue;
+        };
+        for model in models {
+            let Some(model) = model.as_object_mut() else { continue };
+            if !model.get("cost").is_some_and(|value| value.is_object()) {
+                model.insert("cost".into(), serde_json::json!({
+                    "input": 0,
+                    "output": 0,
+                    "cacheRead": 0,
+                    "cacheWrite": 0,
+                    "tiers": []
+                }));
+                changed = true;
+                continue;
+            }
+            let cost = model.get_mut("cost").and_then(|value| value.as_object_mut()).unwrap();
+            for key in ["input", "output", "cacheRead", "cacheWrite"] {
+                if !cost.contains_key(key) {
+                    cost.insert(key.into(), serde_json::json!(0));
+                    changed = true;
+                }
+            }
+            if !cost.get("tiers").is_some_and(|value| value.is_array()) {
+                cost.insert("tiers".into(), serde_json::json!([]));
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+fn write_models_config(path: &std::path::Path, config: &serde_json::Value) -> Result<(), String> {
+    let content = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    std::fs::write(path, content).map_err(|e| format!("写入 models.json 失败：{e}"))
+}
+
 /// 生成默认的 models.json 模板（首次使用时）
 fn default_models_json() -> serde_json::Value {
     serde_json::json!({
@@ -1146,33 +1191,35 @@ fn default_models_json() -> serde_json::Value {
 async fn get_models_config() -> Result<serde_json::Value, String> {
     let path = get_models_json_path()?;
     if !path.exists() {
-        let default = default_models_json();
+        let mut default = default_models_json();
+        normalize_models_config(&mut default);
         // 写入默认模板，方便用户直接编辑
         let agent_dir = path.parent().ok_or("无效的路径")?;
         if !agent_dir.exists() {
             std::fs::create_dir_all(agent_dir).map_err(|e| format!("创建目录失败：{e}"))?;
         }
-        let content = serde_json::to_string_pretty(&default).map_err(|e| e.to_string())?;
-        let _ = std::fs::write(&path, content);
+        let _ = write_models_config(&path, &default);
         return Ok(default);
     }
     let content = std::fs::read_to_string(&path).map_err(|e| format!("读取 models.json 失败：{e}"))?;
-    let val: serde_json::Value = serde_json::from_str(&content)
+    let mut val: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("解析 models.json 失败：{e}"))?;
+    if normalize_models_config(&mut val) {
+        write_models_config(&path, &val)?;
+    }
     Ok(val)
 }
 
 /// 保存 Pi 的 models.json
 #[tauri::command]
-async fn save_models_config(config: serde_json::Value) -> Result<(), String> {
+async fn save_models_config(mut config: serde_json::Value) -> Result<(), String> {
     let path = get_models_json_path()?;
     let agent_dir = path.parent().ok_or("无效的路径")?;
     if !agent_dir.exists() {
         std::fs::create_dir_all(agent_dir).map_err(|e| format!("创建目录失败：{e}"))?;
     }
-    let content = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    std::fs::write(&path, content).map_err(|e| format!("写入 models.json 失败：{e}"))?;
-    Ok(())
+    normalize_models_config(&mut config);
+    write_models_config(&path, &config)
 }
 
 /// 应用 models.json 中的 API Key 到环境变量
@@ -1198,8 +1245,11 @@ fn apply_models_config_inner() -> Result<String, String> {
         return Ok("无 models.json 可应用".into());
     }
     let content = std::fs::read_to_string(&path).map_err(|e| format!("读取 models.json 失败：{e}"))?;
-    let config: serde_json::Value = serde_json::from_str(&content)
+    let mut config: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("解析 models.json 失败：{e}"))?;
+    if normalize_models_config(&mut config) {
+        write_models_config(&path, &config)?;
+    }
 
     let mut applied = Vec::new();
     if let Some(providers) = config.get("providers").and_then(|v| v.as_object()) {
@@ -1916,6 +1966,27 @@ async fn get_agent_paths() -> Result<serde_json::Value, String> {
 #[tauri::command]
 async fn path_exists(path: String) -> Result<bool, String> {
     Ok(std::path::Path::new(&path).exists())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_models_config;
+
+    #[test]
+    fn model_config_normalization_adds_safe_cost_defaults() {
+        let mut config = serde_json::json!({
+            "providers": {
+                "custom": {
+                    "models": [{ "id": "demo", "name": "Demo" }]
+                }
+            }
+        });
+
+        assert!(normalize_models_config(&mut config));
+        assert_eq!(config["providers"]["custom"]["models"][0]["cost"]["input"], 0);
+        assert_eq!(config["providers"]["custom"]["models"][0]["cost"]["tiers"], serde_json::json!([]));
+        assert!(!normalize_models_config(&mut config));
+    }
 }
 
 fn main() {

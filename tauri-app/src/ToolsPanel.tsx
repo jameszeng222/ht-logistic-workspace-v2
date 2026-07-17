@@ -52,7 +52,6 @@ interface RecentOutput {
 
 interface ToolsPanelProps {
   onSendToAssistant?: (message: string, attachmentPath?: string) => void;
-  onClose?: () => void;
   onToolOutput?: (path: string, toolName: string) => void;
   onToolsChange?: (tools: ToolDef[]) => void;
   onActiveToolChange?: (tool: ToolDef | null) => void;
@@ -177,7 +176,6 @@ function ToolGlyph({ id, size = 18 }: { id: string; size?: number }) {
 
 export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function ToolsPanel({
   onSendToAssistant,
-  onClose,
   onToolOutput,
   onToolsChange,
   onActiveToolChange,
@@ -550,17 +548,6 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
           <span className="tools-page-eyebrow">BUSINESS AUTOMATION</span>
           <h1>物流工具</h1>
           <p>选择工具并提供输入，执行结果可以继续交给 AI 助手检查。</p>
-        </div>
-        <div className="tools-page-actions">
-          <div className={`sidecar-status ${sidecarReady ? "ready" : "error"}`}>
-            {sidecarReady ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
-            {sidecarReady ? "工具服务在线" : "工具服务离线"}
-          </div>
-          {onClose && (
-            <button className="tools-close-button" onClick={onClose} title="返回 AI 助手" aria-label="返回 AI 助手">
-              <X size={18} />
-            </button>
-          )}
         </div>
       </header>
 

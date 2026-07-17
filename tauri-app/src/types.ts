@@ -13,6 +13,7 @@ export interface AssistantMsg {
   id: string;
   text: string;
   thinking?: string;
+  error?: string;
   streaming: boolean;
   toolCallIds: string[];
 }
