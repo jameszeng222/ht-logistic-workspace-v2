@@ -18,13 +18,20 @@ import io
 import zipfile
 
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Query
+from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-from tools import invoice_packing, customs_generator, customs_extractor, data_analysis, hs_code
+from tools import invoice_packing, customs_generator, customs_extractor, data_analysis, hs_code, logistics_data
 
 
 app = FastAPI(title="HT Logistic Workspace — Tools")
+
+
+class LogisticsDataRequest(BaseModel):
+    values: list[list[object]] = Field(default_factory=list)
+    mapping: dict[str, str] = Field(default_factory=dict)
+    source_name: str = "飞书表格"
 
 # Tauri 前端跑在 http://tauri.localhost，开发态跑在 http://localhost:5173，
 # 都需要能调本服务。允许所有 origin 简化开发，生产部署仅本机访问无安全风险。
@@ -89,6 +96,17 @@ async def list_tools():
 async def health():
     """健康检查，Tauri 启动 sidecar 后轮询此接口确认服务就绪。"""
     return {"ok": True}
+
+
+@app.post("/api/logistics-data/analyze")
+async def analyze_logistics_data(request: LogisticsDataRequest):
+    """Analyze tabular values after Tauri securely retrieves them from Feishu."""
+    try:
+        return logistics_data.analyze_values(request.values, request.mapping, request.source_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"分析失败：{e}")
 
 
 # ============ 工具实现 ============

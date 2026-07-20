@@ -41,6 +41,187 @@ struct SidecarState {
 
 const SIDECAR_URL: &str = "http://127.0.0.1:8000";
 const SIDECAR_PORT: u16 = 8000;
+const FEISHU_KEYRING_SERVICE: &str = "com.local.ht-logistic-agent.feishu";
+const FEISHU_KEYRING_USER: &str = "default";
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct FeishuCredentials {
+    app_id: String,
+    app_secret: String,
+}
+
+fn feishu_keyring_entry() -> Result<keyring::Entry, String> {
+    keyring::Entry::new(FEISHU_KEYRING_SERVICE, FEISHU_KEYRING_USER)
+        .map_err(|e| format!("无法访问 Windows 凭据库：{e}"))
+}
+
+fn load_feishu_credentials() -> Result<FeishuCredentials, String> {
+    let raw = feishu_keyring_entry()?
+        .get_password()
+        .map_err(|_| "尚未配置飞书 App ID 和 App Secret".to_string())?;
+    serde_json::from_str(&raw).map_err(|e| format!("飞书凭据格式无效：{e}"))
+}
+
+fn parse_feishu_spreadsheet_token(input: &str) -> Result<String, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("请输入飞书表格链接".into());
+    }
+    if let Some(after) = trimmed.split("/sheets/").nth(1) {
+        let token = after.split(['?', '#', '/']).next().unwrap_or("").trim();
+        if !token.is_empty() {
+            return Ok(token.to_string());
+        }
+    }
+    if trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return Ok(trimmed.to_string());
+    }
+    if trimmed.contains("/wiki/") {
+        return Err("知识库中的表格需要先转换为 spreadsheet token，第一版暂不支持 wiki 链接".into());
+    }
+    Err("无法从链接中识别飞书表格 token".into())
+}
+
+fn feishu_api_error(payload: &serde_json::Value) -> Option<String> {
+    let code = payload.get("code").and_then(|value| value.as_i64()).unwrap_or(0);
+    if code == 0 {
+        return None;
+    }
+    let msg = payload.get("msg").and_then(|value| value.as_str()).unwrap_or("请求失败");
+    let action = match code {
+        1310213 => "请确认应用已开通电子表格只读权限，并已被添加为该表格的协作者",
+        1310214 => "请检查表格链接是否正确，或表格是否已被删除",
+        1310215 | 1310211 => "请重新选择工作表",
+        1310217 => "请求过于频繁，请稍后重试",
+        _ => "请检查飞书应用配置与表格权限",
+    };
+    Some(format!("飞书接口错误 {code}：{msg}。{action}"))
+}
+
+async fn feishu_tenant_token(client: &reqwest::Client, credentials: &FeishuCredentials) -> Result<String, String> {
+    let response = client
+        .post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal")
+        .json(&serde_json::json!({
+            "app_id": credentials.app_id,
+            "app_secret": credentials.app_secret,
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("连接飞书失败：{e}"))?;
+    let payload: serde_json::Value = response.json().await.map_err(|e| format!("解析飞书授权响应失败：{e}"))?;
+    if let Some(error) = feishu_api_error(&payload) {
+        return Err(error);
+    }
+    payload
+        .get("tenant_access_token")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| "飞书授权响应中缺少 tenant_access_token".to_string())
+}
+
+#[tauri::command]
+fn save_feishu_credentials(app_id: String, app_secret: String) -> Result<serde_json::Value, String> {
+    let app_id = app_id.trim().to_string();
+    let app_secret = app_secret.trim().to_string();
+    if app_id.is_empty() || app_secret.is_empty() {
+        return Err("App ID 和 App Secret 不能为空".into());
+    }
+    let credentials = FeishuCredentials { app_id: app_id.clone(), app_secret };
+    let raw = serde_json::to_string(&credentials).map_err(|e| e.to_string())?;
+    feishu_keyring_entry()?.set_password(&raw).map_err(|e| format!("保存飞书凭据失败：{e}"))?;
+    Ok(serde_json::json!({ "configured": true, "appId": app_id }))
+}
+
+#[tauri::command]
+fn get_feishu_connection() -> Result<serde_json::Value, String> {
+    match load_feishu_credentials() {
+        Ok(credentials) => Ok(serde_json::json!({ "configured": true, "appId": credentials.app_id })),
+        Err(_) => Ok(serde_json::json!({ "configured": false, "appId": null })),
+    }
+}
+
+#[tauri::command]
+fn clear_feishu_credentials() -> Result<(), String> {
+    match feishu_keyring_entry()?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("清除飞书凭据失败：{e}")),
+    }
+}
+
+#[tauri::command]
+async fn feishu_list_sheets(spreadsheet_url: String) -> Result<serde_json::Value, String> {
+    let spreadsheet_token = parse_feishu_spreadsheet_token(&spreadsheet_url)?;
+    let credentials = load_feishu_credentials()?;
+    let client = reqwest::Client::new();
+    let access_token = feishu_tenant_token(&client, &credentials).await?;
+    let url = format!(
+        "https://open.feishu.cn/open-apis/sheets/v3/spreadsheets/{spreadsheet_token}/sheets/query"
+    );
+    let payload: serde_json::Value = client
+        .get(url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|e| format!("读取飞书工作表失败：{e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("解析飞书工作表响应失败：{e}"))?;
+    if let Some(error) = feishu_api_error(&payload) {
+        return Err(error);
+    }
+    Ok(serde_json::json!({
+        "spreadsheetToken": spreadsheet_token,
+        "sheets": payload.pointer("/data/sheets").cloned().unwrap_or_else(|| serde_json::json!([])),
+    }))
+}
+
+#[tauri::command]
+async fn feishu_fetch_sheet(
+    spreadsheet_url: String,
+    sheet_id: String,
+    range: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let spreadsheet_token = parse_feishu_spreadsheet_token(&spreadsheet_url)?;
+    let sheet_id = sheet_id.trim();
+    if sheet_id.is_empty() {
+        return Err("请先选择工作表".into());
+    }
+    let requested = range.unwrap_or_default();
+    let requested = requested.trim();
+    let value_range = if requested.is_empty() {
+        format!("{sheet_id}!A1:Z2000")
+    } else if requested.contains('!') {
+        requested.to_string()
+    } else {
+        format!("{sheet_id}!{requested}")
+    };
+    let credentials = load_feishu_credentials()?;
+    let client = reqwest::Client::new();
+    let access_token = feishu_tenant_token(&client, &credentials).await?;
+    let mut url = reqwest::Url::parse(&format!(
+        "https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{spreadsheet_token}/values/"
+    )).map_err(|e| e.to_string())?;
+    url.path_segments_mut().map_err(|_| "飞书读取地址无效".to_string())?.push(&value_range);
+    let payload: serde_json::Value = client
+        .get(url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|e| format!("读取飞书表格失败：{e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("解析飞书表格响应失败：{e}"))?;
+    if let Some(error) = feishu_api_error(&payload) {
+        return Err(error);
+    }
+    let values = payload.pointer("/data/valueRange/values").cloned().unwrap_or_else(|| serde_json::json!([]));
+    Ok(serde_json::json!({
+        "spreadsheetToken": spreadsheet_token,
+        "range": payload.pointer("/data/valueRange/range").cloned().unwrap_or_else(|| serde_json::json!(value_range)),
+        "revision": payload.pointer("/data/revision").cloned().unwrap_or(serde_json::Value::Null),
+        "values": values,
+    }))
+}
 
 /// 本地解压 pi-runtime 的目录：`%LOCALAPPDATA%\ht-logistic\pi-runtime\`
 /// 用 LOCALAPPDATA 而非安装目录（Program Files 只管理员可写），
@@ -1970,7 +2151,7 @@ async fn path_exists(path: String) -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_models_config;
+    use super::{normalize_models_config, parse_feishu_spreadsheet_token};
 
     #[test]
     fn model_config_normalization_adds_safe_cost_defaults() {
@@ -1986,6 +2167,16 @@ mod tests {
         assert_eq!(config["providers"]["custom"]["models"][0]["cost"]["input"], 0);
         assert_eq!(config["providers"]["custom"]["models"][0]["cost"]["tiers"], serde_json::json!([]));
         assert!(!normalize_models_config(&mut config));
+    }
+
+    #[test]
+    fn parses_feishu_sheet_links_and_plain_tokens() {
+        assert_eq!(
+            parse_feishu_spreadsheet_token("https://example.feishu.cn/sheets/shtcnExample123?sheet=abc").unwrap(),
+            "shtcnExample123"
+        );
+        assert_eq!(parse_feishu_spreadsheet_token("shtcnPlainToken").unwrap(), "shtcnPlainToken");
+        assert!(parse_feishu_spreadsheet_token("https://example.feishu.cn/wiki/wikiToken").is_err());
     }
 }
 
@@ -2013,7 +2204,9 @@ fn main() {
             write_binary_file, open_in_explorer, open_update_folder,
             list_extensions, install_extension, uninstall_extension,
             get_models_config, save_models_config, apply_models_config, test_model_connection,
-            list_dir, open_file, get_agent_paths, path_exists
+            list_dir, open_file, get_agent_paths, path_exists,
+            save_feishu_credentials, get_feishu_connection, clear_feishu_credentials,
+            feishu_list_sheets, feishu_fetch_sheet
         ])
         .setup(|app| {
             // 启动前先应用模型配置（把 API Key 注入环境变量）

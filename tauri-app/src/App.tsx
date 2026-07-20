@@ -21,6 +21,7 @@ import { extractAssistantMessageContent, formatPiError, rebuildTurnsFromMessages
 import { ChartView, extractChartConfig } from "./Chart";
 import { ToolsPanel, type ToolsPanelHandle, type ToolDef } from "./ToolsPanel";
 import { FileBrowser } from "./FileBrowser";
+import { LogisticsDataPanel } from "./LogisticsDataPanel";
 import { checkUpdate, downloadAndInstallUpdate, type UpdateStatus } from "./updater";
 import type { ToolCall, AssistantMsg, Turn } from "./types";
 import {
@@ -232,7 +233,7 @@ export default function App() {
   const [currentModel, setCurrentModel] = useState<ModelInfo | null>(null);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showPermissionDropdown, setShowPermissionDropdown] = useState(false);
-  const [workspaceView, setWorkspaceView] = useState<"assistant" | "tool">("assistant");
+  const [workspaceView, setWorkspaceView] = useState<"assistant" | "tool" | "data">("assistant");
   const [assistantSidebarView, setAssistantSidebarView] = useState<"quick" | "files">("quick");
   const [contextPanelTab, setContextPanelTab] = useState<"files" | "outputs">("files");
   const [quickActions, setQuickActions] = useState<QuickAction[]>(loadQuickActions);
@@ -1731,7 +1732,7 @@ export default function App() {
       </header>
 
       {/* ============ 主体 ============ */}
-      <div className={`body workspace-mode ${workspaceView === "tool" ? "tool-view" : "assistant-view"}`}>
+      <div className={`body workspace-mode ${workspaceView}-view`}>
         <aside className="mode-rail" aria-label="页面切换">
           <nav className="mode-rail-list">
             <button
@@ -1749,6 +1750,14 @@ export default function App() {
             >
               <Wrench size={19} />
               <span>工具</span>
+            </button>
+            <button
+              className={`mode-rail-item ${workspaceView === "data" ? "active" : ""}`}
+              onClick={() => setWorkspaceView("data")}
+              title="物流数据"
+            >
+              <ChartNoAxesCombined size={19} />
+              <span>物流数据</span>
             </button>
           </nav>
           <div className="mode-rail-footer">
@@ -1943,6 +1952,15 @@ export default function App() {
             )}
           </div>
         </aside>}
+
+        {workspaceView === "data" && (
+          <LogisticsDataPanel
+            onSendToAssistant={(message) => {
+              setWorkspaceView("assistant");
+              send(message);
+            }}
+          />
+        )}
 
         {/* 左侧栏 */}
         {false && (
