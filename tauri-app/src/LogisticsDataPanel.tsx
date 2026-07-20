@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   AlertTriangle,
-  ArrowRight,
   BarChart3,
   CheckCircle2,
   CloudDownload,
@@ -16,8 +15,6 @@ import {
   Send,
   Settings2,
   ShieldCheck,
-  Sparkles,
-  Table2,
   Trash2,
 } from "lucide-react";
 
@@ -108,31 +105,19 @@ const MAPPING_FIELDS: Array<{ key: keyof FieldMapping; label: string; hint: stri
   { key: "route", label: "线路/渠道", hint: "用于业务分布" },
 ];
 
-const DEMO_VALUES: unknown[][] = [
-  ["运单号", "客户名称", "运输状态", "应收金额", "发货日期", "运输线路"],
-  ["HT260701", "德远贸易", "已完成", 12800, "2026-07-01", "德国专线"],
-  ["HT260702", "德远贸易", "运输中", 9600, "2026-07-02", "德国专线"],
-  ["HT260703", "联宇科技", "待提货", 7200, "2026-07-03", "英国专线"],
-  ["HT260704", "万邑通", "已完成", 15600, "2026-07-04", "德国专线"],
-  ["HT260705", "联宇科技", "异常待处理", -300, "日期待确认", "美国海运"],
-  ["HT260705", "", "运输中", 11200, "2026-07-06", "美国海运"],
-  ["HT260707", "盛达供应链", "已完成", 18900, "2026-07-07", "英国专线"],
-  ["HT260708", "万邑通", "待提货", 8400, "2026-07-08", "德国专线"],
-];
-
 function loadSource(): SourceConfig {
   try {
     const stored = JSON.parse(localStorage.getItem(SOURCE_KEY) || "null");
     if (stored && typeof stored.name === "string" && typeof stored.url === "string") {
       return {
-        name: stored.name,
+        name: stored.name === "业务数据表" ? "" : stored.name,
         url: stored.url,
         sheetId: typeof stored.sheetId === "string" ? stored.sheetId : "",
-        range: typeof stored.range === "string" ? stored.range : "A1:Z2000",
+        range: stored.range === "A1:Z2000" ? "" : (typeof stored.range === "string" ? stored.range : ""),
       };
     }
   } catch { /* ignore invalid local preferences */ }
-  return { name: "业务数据表", url: "", sheetId: "", range: "A1:Z2000" };
+  return { name: "", url: "", sheetId: "", range: "" };
 }
 
 function sheetId(sheet: FeishuSheet): string {
@@ -294,13 +279,6 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
     }
   }, [analyze, source]);
 
-  const loadDemo = useCallback(async () => {
-    const nextMapping = autoMapping(DEMO_VALUES[0].map(String));
-    setRawValues(DEMO_VALUES);
-    setMapping(nextMapping);
-    await analyze(DEMO_VALUES, nextMapping, "物流业务演示数据");
-  }, [analyze]);
-
   const applyMapping = useCallback(() => {
     if (rawValues) analyze(rawValues, mapping, report?.sourceName || source.name);
   }, [analyze, mapping, rawValues, report?.sourceName, source.name]);
@@ -351,7 +329,7 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
 
         <div className="data-sidebar-label">数据源</div>
         <section className="data-source-form">
-          <label><span>名称</span><input value={source.name} onChange={(event) => setSource((current) => ({ ...current, name: event.target.value }))} /></label>
+          <label><span>名称</span><input value={source.name} onChange={(event) => setSource((current) => ({ ...current, name: event.target.value }))} placeholder="可选" /></label>
           <label><span>飞书表格链接</span><div className="data-input-with-icon"><Link2 size={14} /><input value={source.url} onChange={(event) => setSource((current) => ({ ...current, url: event.target.value, sheetId: "" }))} placeholder="https://xxx.feishu.cn/sheets/..." /></div></label>
           <button className="data-secondary-button" type="button" onClick={loadSheets} disabled={!connection.configured || loading === "sheets"}>
             {loading === "sheets" ? <LoaderCircle className="spin" size={15} /> : <CloudDownload size={15} />}
@@ -361,13 +339,10 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
             <option value="">{sheets.length ? "选择工作表" : "连接后显示"}</option>
             {sheets.map((sheet) => <option key={sheetId(sheet)} value={sheetId(sheet)}>{sheet.title || sheetId(sheet)}</option>)}
           </select></label>
-          <label><span>读取范围</span><input value={source.range} onChange={(event) => setSource((current) => ({ ...current, range: event.target.value }))} placeholder="A1:Z2000" /></label>
+          <label><span>读取范围</span><input value={source.range} onChange={(event) => setSource((current) => ({ ...current, range: event.target.value }))} placeholder="可选，例如 A1:Z2000" /></label>
         </section>
 
         <div className="data-sidebar-spacer" />
-        <button className="data-demo-button" type="button" onClick={loadDemo} disabled={Boolean(loading)}>
-          <Sparkles size={15} /><span><strong>查看演示数据</strong><small>无需飞书权限</small></span><ArrowRight size={14} />
-        </button>
       </aside>
 
       <section className="logistics-data-page">
@@ -390,14 +365,8 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
         {!report ? (
           <div className="data-empty-state">
             <span className="data-empty-icon"><BarChart3 size={28} /></span>
-            <h2>连接一张飞书表格开始分析</h2>
-            <p>只读取你授权的范围。原始数据留在本机，AI 仅接收整理后的分析结果。</p>
-            <div className="data-empty-capabilities">
-              <span><Table2 size={16} /><strong>自动整理</strong><small>识别字段与数据质量</small></span>
-              <span><BarChart3 size={16} /><strong>业务分布</strong><small>客户、状态与线路</small></span>
-              <span><AlertTriangle size={16} /><strong>异常复核</strong><small>缺失、重复和错误值</small></span>
-            </div>
-            <button className="data-secondary-button" type="button" onClick={loadDemo}><Sparkles size={15} />先用演示数据看看</button>
+            <h2>连接飞书表格</h2>
+            <p>选择你要读取的工作表和范围，连接后显示真实数据。</p>
           </div>
         ) : (
           <div className="data-report-scroll">
