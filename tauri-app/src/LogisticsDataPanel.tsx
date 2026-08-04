@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { TransferControlTower, type TransferControlTowerReport } from "./TransferControlTower";
 import {
   AlertTriangle,
   BarChart3,
   CheckCircle2,
+  ChevronDown,
   CloudDownload,
   Database,
   ExternalLink,
+  FileSpreadsheet,
   KeyRound,
   Link2,
   LoaderCircle,
@@ -16,6 +19,7 @@ import {
   Settings2,
   ShieldCheck,
   Trash2,
+  Upload,
 } from "lucide-react";
 
 interface FeishuConnection {
@@ -147,6 +151,7 @@ function kindLabel(kind: string): string {
 export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProps) {
   const [connection, setConnection] = useState<FeishuConnection>({ configured: false, appId: null });
   const [showCredentials, setShowCredentials] = useState(false);
+  const [showSheetSource, setShowSheetSource] = useState(false);
   const [appId, setAppId] = useState("");
   const [appSecret, setAppSecret] = useState("");
   const [source, setSource] = useState<SourceConfig>(loadSource);
@@ -154,18 +159,21 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
   const [mapping, setMapping] = useState<FieldMapping>(EMPTY_MAPPING);
   const [rawValues, setRawValues] = useState<unknown[][] | null>(null);
   const [report, setReport] = useState<LogisticsReport | null>(null);
+  const [towerReport, setTowerReport] = useState<TransferControlTowerReport | null>(null);
+  const [localFile, setLocalFile] = useState<File | null>(null);
   const [lastSync, setLastSync] = useState<number | null>(null);
-  const [loading, setLoading] = useState<"credentials" | "sheets" | "sync" | "analyze" | null>(null);
+  const [loading, setLoading] = useState<"credentials" | "sheets" | "sync" | "analyze" | "workbook" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     invoke<FeishuConnection>("get_feishu_connection")
       .then((value) => {
         setConnection(value);
         if (value.appId) setAppId(value.appId);
-        setShowCredentials(!value.configured);
+        setShowCredentials(false);
       })
-      .catch(() => setShowCredentials(true));
+      .catch(() => setShowCredentials(false));
   }, []);
 
   useEffect(() => {
@@ -283,6 +291,27 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
     if (rawValues) analyze(rawValues, mapping, report?.sourceName || source.name);
   }, [analyze, mapping, rawValues, report?.sourceName, source.name]);
 
+  const loadWorkbook = useCallback(async (file: File) => {
+    setLoading("workbook");
+    setError(null);
+    try {
+      const baseUrl = await sidecarUrl();
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch(`${baseUrl}/api/logistics-data/control-tower`, { method: "POST", body: formData });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || `读取服务返回 ${response.status}`);
+      setLocalFile(file);
+      setTowerReport(payload as TransferControlTowerReport);
+      setReport(null);
+      setLastSync(Date.now());
+    } catch (reason) {
+      setError(`读取 Excel 失败：${String(reason)}`);
+    } finally {
+      setLoading(null);
+    }
+  }, [sidecarUrl]);
+
   const sendToAi = useCallback(() => {
     if (!report) return;
     const anomalyText = report.anomalies.slice(0, 8).map((item) => `- ${item.title}：${item.detail}`).join("\n") || "- 未发现明显异常";
@@ -303,8 +332,22 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
       <aside className="data-source-sidebar" aria-label="物流数据源">
         <header className="data-source-heading">
           <span><Database size={18} /></span>
-          <div><strong>物流数据</strong><small>飞书表格 · 只读同步</small></div>
+          <div><strong>物流数据</strong><small>调拨时效控制塔</small></div>
         </header>
+
+        <section className={`data-local-source ${towerReport ? "active" : ""}`}>
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls" hidden onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) loadWorkbook(file);
+            event.target.value = "";
+          }} />
+          <div><span><FileSpreadsheet size={17} /></span><div><strong>{localFile?.name || "调拨时效 Excel"}</strong><small>{towerReport ? `${towerReport.rows.toLocaleString("zh-CN")} 箱 · 已载入` : "使用本地文件生成控制塔"}</small></div></div>
+          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={loading === "workbook"}>
+            {loading === "workbook" ? <LoaderCircle className="spin" size={14} /> : <Upload size={14} />}{towerReport ? "更换" : "选择文件"}
+          </button>
+        </section>
+
+        <div className="data-sidebar-label">飞书连接（后续同步）</div>
 
         <section className={`data-connection ${connection.configured ? "connected" : ""}`}>
           <div>
@@ -327,8 +370,10 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
           </section>
         )}
 
-        <div className="data-sidebar-label">数据源</div>
-        <section className="data-source-form">
+        <button className="data-sidebar-toggle" type="button" onClick={() => setShowSheetSource((value) => !value)}>
+          <span>普通电子表格</span><ChevronDown className={showSheetSource ? "open" : ""} size={14} />
+        </button>
+        {showSheetSource && <section className="data-source-form">
           <label><span>名称</span><input value={source.name} onChange={(event) => setSource((current) => ({ ...current, name: event.target.value }))} placeholder="可选" /></label>
           <label><span>飞书表格链接</span><div className="data-input-with-icon"><Link2 size={14} /><input value={source.url} onChange={(event) => setSource((current) => ({ ...current, url: event.target.value, sheetId: "" }))} placeholder="https://xxx.feishu.cn/sheets/..." /></div></label>
           <button className="data-secondary-button" type="button" onClick={loadSheets} disabled={!connection.configured || loading === "sheets"}>
@@ -340,7 +385,7 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
             {sheets.map((sheet) => <option key={sheetId(sheet)} value={sheetId(sheet)}>{sheet.title || sheetId(sheet)}</option>)}
           </select></label>
           <label><span>读取范围</span><input value={source.range} onChange={(event) => setSource((current) => ({ ...current, range: event.target.value }))} placeholder="可选，例如 A1:Z2000" /></label>
-        </section>
+        </section>}
 
         <div className="data-sidebar-spacer" />
       </aside>
@@ -349,26 +394,29 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
         <header className="data-page-header">
           <div>
             <span className="data-eyebrow">LOGISTICS INTELLIGENCE</span>
-            <h1>{report?.sourceName || "物流数据分析"}</h1>
-            <p>{report ? report.summary : "从飞书表格同步业务数据，自动整理指标、分布与异常。"}</p>
+            <h1>{towerReport ? "调拨时效控制塔" : (report?.sourceName || "物流数据分析")}</h1>
+            <p>{towerReport ? `${towerReport.sourceName} · 箱维度数据 · 筛选、异常和物流商绩效联动` : (report ? report.summary : "选择调拨时效 Excel，或从飞书表格同步业务数据。")}</p>
           </div>
           <div className="data-header-actions">
             {lastSync && <span className="data-last-sync"><CheckCircle2 size={14} />{new Date(lastSync).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 已更新</span>}
-            <button className="data-primary-button" type="button" onClick={sync} disabled={!connection.configured || !source.sheetId || Boolean(loading)}>
-              {loading === "sync" || loading === "analyze" ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}立即同步
+            <button className="data-primary-button" type="button" onClick={() => localFile ? loadWorkbook(localFile) : sync()} disabled={localFile ? Boolean(loading) : (!connection.configured || !source.sheetId || Boolean(loading))}>
+              {loading === "sync" || loading === "analyze" || loading === "workbook" ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}{localFile ? "重新读取" : "立即同步"}
             </button>
           </div>
         </header>
 
         {error && <div className="data-error"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)}>×</button></div>}
 
-        {!report ? (
+        {!report && !towerReport ? (
           <div className="data-empty-state">
             <span className="data-empty-icon"><BarChart3 size={28} /></span>
-            <h2>连接飞书表格</h2>
-            <p>选择你要读取的工作表和范围，连接后显示真实数据。</p>
+            <h2>载入调拨时效数据</h2>
+            <p>先使用本地 Excel 查看控制塔，之后可以无缝切换到飞书多维表格。</p>
+            <button className="data-primary-button" type="button" onClick={() => fileInputRef.current?.click()}><Upload size={15} />选择 Excel</button>
           </div>
-        ) : (
+        ) : towerReport ? (
+          <TransferControlTower report={towerReport} onSendToAssistant={onSendToAssistant} />
+        ) : report ? (
           <div className="data-report-scroll">
             <section className="data-metrics" aria-label="核心指标">
               {report.metrics.map((metric) => (
@@ -439,9 +487,9 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
               <div className="data-sample-scroll"><table><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{report.sampleRows.map((row, index) => <tr key={index}>{columns.map((column) => <td key={column}>{String(row[column] ?? "")}</td>)}</tr>)}</tbody></table></div>
             </section>
           </div>
-        )}
+        ) : null}
 
-        <footer className="data-page-footer"><ShieldCheck size={13} />只读访问 · 凭据保存在 Windows 凭据库 · <button type="button" onClick={() => window.open("https://open.feishu.cn/app", "_blank")}><ExternalLink size={12} />飞书开放平台</button></footer>
+        <footer className="data-page-footer"><ShieldCheck size={13} />{towerReport ? "本地只读解析 · 源文件不会上传云端" : "只读访问 · 凭据保存在 Windows 凭据库"}{!towerReport && <> · <button type="button" onClick={() => window.open("https://open.feishu.cn/app", "_blank")}><ExternalLink size={12} />飞书开放平台</button></>}</footer>
       </section>
     </>
   );

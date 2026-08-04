@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-from tools import invoice_packing, customs_generator, customs_extractor, data_analysis, hs_code, logistics_data, email_monitor
+from tools import invoice_packing, customs_generator, customs_extractor, data_analysis, hs_code, logistics_data, email_monitor, transfer_control_tower
 
 
 app = FastAPI(title="HT Logistic Workspace — Tools")
@@ -112,6 +112,22 @@ async def analyze_logistics_data(request: LogisticsDataRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"分析失败：{e}")
+
+
+@app.post("/api/logistics-data/control-tower")
+async def build_logistics_control_tower(file: UploadFile = File(...)):
+    """Read a box-level transfer workbook and return normalized dashboard records."""
+    content = await file.read()
+    try:
+        return await run_in_threadpool(
+            transfer_control_tower.parse_workbook,
+            content,
+            file.filename or "调拨时效表.xlsx",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取调拨数据失败：{e}")
 
 
 @app.post("/api/email-monitor/scan")
