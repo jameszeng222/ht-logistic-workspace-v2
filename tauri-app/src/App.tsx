@@ -22,6 +22,7 @@ import { ChartView, extractChartConfig } from "./Chart";
 import { ToolsPanel, type ToolsPanelHandle, type ToolDef } from "./ToolsPanel";
 import { FileBrowser } from "./FileBrowser";
 import { LogisticsDataPanel } from "./LogisticsDataPanel";
+import { EmailMonitorPanel } from "./EmailMonitorPanel";
 import { checkUpdate, downloadAndInstallUpdate, type UpdateStatus } from "./updater";
 import type { ToolCall, AssistantMsg, Turn } from "./types";
 import {
@@ -233,7 +234,8 @@ export default function App() {
   const [currentModel, setCurrentModel] = useState<ModelInfo | null>(null);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showPermissionDropdown, setShowPermissionDropdown] = useState(false);
-  const [workspaceView, setWorkspaceView] = useState<"assistant" | "tool" | "data">("assistant");
+  const [workspaceView, setWorkspaceView] = useState<"assistant" | "tool" | "data" | "email">("assistant");
+  const [emailAttentionCount, setEmailAttentionCount] = useState(0);
   const [assistantSidebarView, setAssistantSidebarView] = useState<"quick" | "files">("quick");
   const [contextPanelTab, setContextPanelTab] = useState<"files" | "outputs">("files");
   const [quickActions, setQuickActions] = useState<QuickAction[]>(loadQuickActions);
@@ -1759,6 +1761,15 @@ export default function App() {
               <ChartNoAxesCombined size={19} />
               <span>物流数据</span>
             </button>
+            <button
+              className={`mode-rail-item ${workspaceView === "email" ? "active" : ""}`}
+              onClick={() => setWorkspaceView("email")}
+              title="邮件监控"
+            >
+              <Mail size={19} />
+              <span>邮件监控</span>
+              {emailAttentionCount > 0 && <i className="mode-rail-badge">{emailAttentionCount > 99 ? "99+" : emailAttentionCount}</i>}
+            </button>
           </nav>
           <div className="mode-rail-footer">
             <button
@@ -1961,6 +1972,15 @@ export default function App() {
             }}
           />
         )}
+
+        <EmailMonitorPanel
+          active={workspaceView === "email"}
+          onAttentionCount={setEmailAttentionCount}
+          onSendToAssistant={(message) => {
+            setWorkspaceView("assistant");
+            send(message);
+          }}
+        />
 
         {/* 左侧栏 */}
         {false && (

@@ -43,6 +43,7 @@ const SIDECAR_URL: &str = "http://127.0.0.1:8000";
 const SIDECAR_PORT: u16 = 8000;
 const FEISHU_KEYRING_SERVICE: &str = "com.local.ht-logistic-agent.feishu";
 const FEISHU_KEYRING_USER: &str = "default";
+const EMAIL_KEYRING_SERVICE: &str = "com.local.ht-logistic-agent.email-monitor";
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct FeishuCredentials {
@@ -221,6 +222,108 @@ async fn feishu_fetch_sheet(
         "revision": payload.pointer("/data/revision").cloned().unwrap_or(serde_json::Value::Null),
         "values": values,
     }))
+}
+
+fn email_keyring_entry(email: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(EMAIL_KEYRING_SERVICE, email)
+        .map_err(|e| format!("无法访问 Windows 凭据库：{e}"))
+}
+
+#[tauri::command]
+fn save_email_credentials(email: String, password: String) -> Result<serde_json::Value, String> {
+    let email = email.trim().to_lowercase();
+    let password = password.trim().to_string();
+    if !email.contains('@') {
+        return Err("请输入有效的邮箱地址".into());
+    }
+    if password.is_empty() {
+        return Err("客户端专用密码不能为空".into());
+    }
+    email_keyring_entry(&email)?
+        .set_password(&password)
+        .map_err(|e| format!("保存邮箱凭据失败：{e}"))?;
+    Ok(serde_json::json!({ "email": email, "configured": true }))
+}
+
+#[tauri::command]
+fn get_email_connections(emails: Vec<String>) -> Result<serde_json::Value, String> {
+    let connections: Vec<serde_json::Value> = emails
+        .into_iter()
+        .map(|value| {
+            let email = value.trim().to_lowercase();
+            let configured = email_keyring_entry(&email)
+                .and_then(|entry| entry.get_password().map_err(|e| e.to_string()))
+                .map(|password| !password.is_empty())
+                .unwrap_or(false);
+            serde_json::json!({ "email": email, "configured": configured })
+        })
+        .collect();
+    Ok(serde_json::json!({ "connections": connections }))
+}
+
+#[tauri::command]
+fn clear_email_credentials(email: String) -> Result<(), String> {
+    let email = email.trim().to_lowercase();
+    match email_keyring_entry(&email)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("清除邮箱凭据失败：{e}")),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EmailScanAccount {
+    email: String,
+    host: String,
+    port: u16,
+    mailbox: String,
+    keywords: Vec<String>,
+    known_uids: Vec<u64>,
+    last_uid: u64,
+}
+
+#[tauri::command]
+async fn email_monitor_scan(accounts: Vec<EmailScanAccount>) -> Result<serde_json::Value, String> {
+    if accounts.is_empty() {
+        return Err("尚未配置监控邮箱".into());
+    }
+    let mut payload_accounts = Vec::with_capacity(accounts.len());
+    for account in accounts {
+        let email = account.email.trim().to_lowercase();
+        let password = email_keyring_entry(&email)?
+            .get_password()
+            .map_err(|_| format!("邮箱 {email} 尚未配置客户端专用密码"))?;
+        payload_accounts.push(serde_json::json!({
+            "email": email,
+            "password": password,
+            "host": account.host,
+            "port": account.port,
+            "mailbox": account.mailbox,
+            "keywords": account.keywords,
+            "knownUids": account.known_uids,
+            "lastUid": account.last_uid,
+        }));
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client
+        .post(format!("{SIDECAR_URL}/api/email-monitor/scan"))
+        .json(&serde_json::json!({ "accounts": payload_accounts }))
+        .send()
+        .await
+        .map_err(|e| format!("邮件监控服务连接失败：{e}"))?;
+    let status = response.status();
+    let payload: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("邮件监控响应无法解析：{e}"))?;
+    if !status.is_success() {
+        let detail = payload.get("detail").and_then(|value| value.as_str()).unwrap_or("扫描失败");
+        return Err(detail.to_string());
+    }
+    Ok(payload)
 }
 
 /// 本地解压 pi-runtime 的目录：`%LOCALAPPDATA%\ht-logistic\pi-runtime\`
@@ -2206,7 +2309,9 @@ fn main() {
             get_models_config, save_models_config, apply_models_config, test_model_connection,
             list_dir, open_file, get_agent_paths, path_exists,
             save_feishu_credentials, get_feishu_connection, clear_feishu_credentials,
-            feishu_list_sheets, feishu_fetch_sheet
+            feishu_list_sheets, feishu_fetch_sheet,
+            save_email_credentials, get_email_connections, clear_email_credentials,
+            email_monitor_scan
         ])
         .setup(|app| {
             // 启动前先应用模型配置（把 API Key 注入环境变量）

@@ -16,13 +16,14 @@ from __future__ import annotations
 
 import io
 import zipfile
+from starlette.concurrency import run_in_threadpool
 
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Query
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-from tools import invoice_packing, customs_generator, customs_extractor, data_analysis, hs_code, logistics_data
+from tools import invoice_packing, customs_generator, customs_extractor, data_analysis, hs_code, logistics_data, email_monitor
 
 
 app = FastAPI(title="HT Logistic Workspace — Tools")
@@ -32,6 +33,10 @@ class LogisticsDataRequest(BaseModel):
     values: list[list[object]] = Field(default_factory=list)
     mapping: dict[str, str] = Field(default_factory=dict)
     source_name: str = "飞书表格"
+
+
+class EmailMonitorRequest(BaseModel):
+    accounts: list[dict[str, object]] = Field(default_factory=list)
 
 # Tauri 前端跑在 http://tauri.localhost，开发态跑在 http://localhost:5173，
 # 都需要能调本服务。允许所有 origin 简化开发，生产部署仅本机访问无安全风险。
@@ -107,6 +112,14 @@ async def analyze_logistics_data(request: LogisticsDataRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"分析失败：{e}")
+
+
+@app.post("/api/email-monitor/scan")
+async def scan_monitored_email(request: EmailMonitorRequest):
+    """Scan configured mailboxes without changing read state."""
+    if not request.accounts:
+        raise HTTPException(status_code=400, detail="尚未配置监控邮箱")
+    return await run_in_threadpool(email_monitor.scan_accounts, request.accounts)
 
 
 # ============ 工具实现 ============
