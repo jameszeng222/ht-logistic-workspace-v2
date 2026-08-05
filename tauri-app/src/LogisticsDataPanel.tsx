@@ -290,7 +290,6 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
         ? result.tableId
         : tables.find((table) => table.name === "调拨时效表（箱维度）")?.table_id || tables[0]?.table_id || "";
       setBaseSource((current) => ({ ...current, tableId: preferred, viewId: result.viewId || current.viewId }));
-      if (!tables.length) setError("连接成功，但这个多维表格中没有可读取的数据表");
     } catch (reason) {
       setError(String(reason));
     } finally {

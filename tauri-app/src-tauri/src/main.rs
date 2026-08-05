@@ -332,11 +332,21 @@ async fn feishu_list_base_tables(base_url: String) -> Result<serde_json::Value, 
     if let Some(error) = feishu_api_error(&payload) {
         return Err(error);
     }
+    let tables = payload
+        .pointer("/data/items")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+    if tables.as_array().is_none_or(|items| items.is_empty()) {
+        return Err(
+            "飞书已识别到这个多维表格，但当前应用看不到其中的数据表。请在多维表格右上角进入“更多 → 添加文档应用”，把本客户端使用的自建应用加入并授予可管理权限；如果已开启高级权限，也要让该应用拥有当前数据表的可管理权限。完成后重新检查。"
+                .into(),
+        );
+    }
     Ok(serde_json::json!({
         "baseToken": reference.token,
         "tableId": reference.table_id,
         "viewId": reference.view_id,
-        "tables": payload.pointer("/data/items").cloned().unwrap_or_else(|| serde_json::json!([])),
+        "tables": tables,
     }))
 }
 
