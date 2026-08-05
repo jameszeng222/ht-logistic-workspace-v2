@@ -13,6 +13,19 @@ REQUIRED_FIELDS = ["调拨单号", "箱号（赫特）", "物流商", "提货时
 
 
 def _clean(value: Any) -> Any:
+    if isinstance(value, dict):
+        for key in ("text", "value", "name"):
+            if key in value:
+                return _clean(value[key])
+        return None
+    if isinstance(value, list):
+        values = [_clean(item) for item in value]
+        values = [item for item in values if item is not None]
+        if not values:
+            return None
+        if len(values) == 1:
+            return values[0]
+        return "、".join(str(item) for item in values)
     if value is None or (not isinstance(value, (list, dict)) and pd.isna(value)):
         return None
     if isinstance(value, str):
@@ -80,11 +93,8 @@ def _is_exception(value: Any) -> bool:
     return bool(text and text not in {"否", "无异常", "未填写", "0", "False", "false"})
 
 
-def parse_workbook(data: bytes, file_name: str, now: datetime | None = None) -> dict[str, Any]:
-    if not file_name.lower().endswith((".xlsx", ".xls")):
-        raise ValueError("请选择 Excel 文件（.xlsx 或 .xls）")
+def _parse_frame(frame: pd.DataFrame, source_name: str, now: datetime) -> dict[str, Any]:
     now = now or datetime.now()
-    frame = pd.read_excel(io.BytesIO(data), sheet_name=0)
     frame.columns = [str(column).strip() for column in frame.columns]
     frame = frame.dropna(how="all")
     missing_fields = [field for field in REQUIRED_FIELDS if field not in frame.columns]
@@ -154,10 +164,30 @@ def parse_workbook(data: bytes, file_name: str, now: datetime | None = None) -> 
         })
 
     return {
-        "sourceName": file_name,
+        "sourceName": source_name,
         "updatedAt": now.strftime("%Y-%m-%d %H:%M"),
         "rows": len(records),
         "columnCount": len(frame.columns),
         "invalidDurationCount": invalid_duration_count,
         "records": records,
     }
+
+
+def parse_workbook(data: bytes, file_name: str, now: datetime | None = None) -> dict[str, Any]:
+    if not file_name.lower().endswith((".xlsx", ".xls")):
+        raise ValueError("请选择 Excel 文件（.xlsx 或 .xls）")
+    frame = pd.read_excel(io.BytesIO(data), sheet_name=0)
+    return _parse_frame(frame, file_name, now or datetime.now())
+
+
+def parse_values(values: list[list[Any]], source_name: str, now: datetime | None = None) -> dict[str, Any]:
+    """Normalize matrix values returned by Feishu Base into control-tower records."""
+    if not values or not values[0]:
+        raise ValueError("飞书数据表没有可读取的数据")
+    headers = [str(_clean(value) or "").strip() for value in values[0]]
+    if not any(headers):
+        raise ValueError("飞书数据表缺少字段标题")
+    width = len(headers)
+    rows = [(list(row) + [None] * width)[:width] for row in values[1:]]
+    frame = pd.DataFrame(rows, columns=headers)
+    return _parse_frame(frame, source_name or "飞书多维表格", now or datetime.now())

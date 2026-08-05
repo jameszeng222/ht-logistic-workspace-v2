@@ -3281,7 +3281,9 @@ body {
   min-height: 0;
   padding: 18px 14px 14px;
   flex-direction: column;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
   background: #f7f9f8;
 }
 
@@ -3368,6 +3370,7 @@ body {
 .data-sidebar-toggle { display: flex; width: 100%; margin-top: 12px; padding: 7px 3px; align-items: center; justify-content: space-between; border: 0; background: transparent; color: #7c8782; font: inherit; font-size: 10px; font-weight: 700; cursor: pointer; }
 .data-sidebar-toggle svg { transition: transform .16s ease; }
 .data-sidebar-toggle svg.open { transform: rotate(180deg); }
+.data-base-source { padding: 10px; border-radius: 7px; background: #eef2f0; }
 .data-input-with-icon { position: relative; }
 .data-input-with-icon svg { position: absolute; top: 10px; left: 9px; color: #8b9691; pointer-events: none; }
 .data-input-with-icon input { padding-left: 30px; }
@@ -3517,9 +3520,15 @@ body {
 .ct-tabs .ct-ai-action { background: #0b806f; color: #fff; }
 .ct-tabs .ct-ai-action:hover { background: #086f61; color: #fff; }
 .ct-filters { padding: 10px 28px 12px; background: #f8faf9; }
-.ct-months { display: flex; padding-bottom: 8px; gap: 5px; overflow-x: auto; }
+.ct-period-row { display: flex; min-width: 0; padding-bottom: 8px; align-items: center; gap: 12px; }
+.ct-months { display: flex; min-width: 0; flex: 1; gap: 5px; overflow-x: auto; }
 .ct-months button { height: 26px; padding: 0 9px; flex: 0 0 auto; border: 0; border-radius: 5px; background: #edf1ef; color: #66736d; font: inherit; font-size: 9px; cursor: pointer; }
 .ct-months button.active { background: #1f2c27; color: #fff; }
+.ct-date-range { display: flex; flex: 0 0 auto; align-items: center; gap: 5px; }
+.ct-date-range > b { color: #68756f; font-size: 8.5px; font-weight: 700; white-space: nowrap; }
+.ct-date-range label { display: flex; height: 28px; padding: 0 7px; align-items: center; gap: 5px; border-radius: 5px; background: #edf1ef; }
+.ct-date-range label span, .ct-date-range > i { color: #7a8680; font-size: 8.5px; font-style: normal; white-space: nowrap; }
+.ct-date-range input { width: 105px; border: 0; outline: none; background: transparent; color: #37443e; font: inherit; font-size: 9px; }
 .ct-filter-row { display: grid; grid-template-columns: repeat(6, minmax(88px, 1fr)) auto; align-items: end; gap: 7px; }
 .ct-filter-row label { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .ct-filter-row label > span { color: #84908a; font-size: 8.5px; font-weight: 650; }
@@ -3602,6 +3611,8 @@ body {
   .ct-tabs, .ct-filters { padding-right: 18px; padding-left: 18px; }
   .ct-scroll { padding-right: 18px; padding-left: 18px; }
   .ct-filter-row { grid-template-columns: repeat(3, minmax(90px, 1fr)) auto; }
+  .ct-period-row { align-items: stretch; flex-direction: column; gap: 7px; }
+  .ct-date-range { justify-content: flex-end; }
   .ct-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 

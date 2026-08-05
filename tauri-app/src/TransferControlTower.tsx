@@ -47,8 +47,9 @@ interface Props {
 }
 
 type View = "overview" | "exceptions" | "providers" | "quality";
-type Filters = { month: string; category: string; team: string; provider: string; transport: string; origin: string; destination: string };
-const EMPTY_FILTERS: Filters = { month: "全部", category: "全部", team: "全部", provider: "全部", transport: "全部", origin: "全部", destination: "全部" };
+type Filters = { month: string; dateFrom: string; dateTo: string; category: string; team: string; provider: string; transport: string; origin: string; destination: string };
+const EMPTY_FILTERS: Filters = { month: "全部", dateFrom: "", dateTo: "", category: "全部", team: "全部", provider: "全部", transport: "全部", origin: "全部", destination: "全部" };
+const FILTER_LABELS: Record<keyof Filters, string> = { month: "月份", dateFrom: "开始日期", dateTo: "结束日期", category: "一级分类", team: "团队", provider: "物流商", transport: "运输方式", origin: "发货仓", destination: "接收仓" };
 const number = new Intl.NumberFormat("zh-CN");
 const percent = (value: number, total: number) => total ? `${(value / total * 100).toFixed(1)}%` : "—";
 
@@ -71,6 +72,8 @@ export function TransferControlTower({ report, onSendToAssistant }: Props) {
   const months = useMemo(() => [...new Set(report.records.map((record) => record.pickupDate?.slice(0, 7)).filter(Boolean) as string[])].sort(), [report.records]);
   const filtered = useMemo(() => report.records.filter((record) => (
     (filters.month === "全部" || record.pickupDate?.slice(0, 7) === filters.month)
+    && (!filters.dateFrom || Boolean(record.pickupDate && record.pickupDate >= filters.dateFrom))
+    && (!filters.dateTo || Boolean(record.pickupDate && record.pickupDate <= filters.dateTo))
     && (filters.category === "全部" || record.category === filters.category)
     && (filters.team === "全部" || record.team === filters.team)
     && (filters.provider === "全部" || record.provider === filters.provider)
@@ -88,7 +91,7 @@ export function TransferControlTower({ report, onSendToAssistant }: Props) {
   const overdueShelf = filtered.filter((record) => record.overdueUnshelved).length;
   const missingTracking = filtered.filter((record) => record.trackingMissing).length;
   const orders = new Set(filtered.map((record) => record.order).filter(Boolean)).size;
-  const activeFilters = Object.values(filters).filter((value) => value !== "全部").length;
+  const activeFilters = Object.entries(filters).filter(([key, value]) => value !== EMPTY_FILTERS[key as keyof Filters]).length;
 
   const providerRows = useMemo(() => {
     const groups = new Map<string, { name: string; boxes: number; completed: number; ontime: number; anomaly: number; duration: number; durationCount: number }>();
@@ -115,7 +118,7 @@ export function TransferControlTower({ report, onSendToAssistant }: Props) {
     const topProviders = providerRows.slice(0, 5).map((row) => `${row.name} ${row.boxes}箱，准交率${percent(row.ontime, row.completed)}，异常率${percent(row.anomaly, row.boxes)}`).join("；");
     onSendToAssistant([
       "请根据下面的调拨时效看板结果，判断主要风险、物流商表现和本周应优先处理的事项。",
-      `筛选范围：${Object.entries(filters).filter(([, value]) => value !== "全部").map(([key, value]) => `${key}=${value}`).join("，") || "全部数据"}`,
+      `筛选范围：${Object.entries(filters).filter(([key, value]) => value !== EMPTY_FILTERS[key as keyof Filters]).map(([key, value]) => `${FILTER_LABELS[key as keyof Filters]}=${value}`).join("，") || "全部数据"}`,
       `共 ${filtered.length} 箱、${orders} 个调拨单，签收准交率 ${percent(ontime, completed.length)}，异常率 ${percent(anomaly, filtered.length)}。`,
       `超期未签收 ${overdueReceipt} 箱，超期未上架 ${overdueShelf} 箱，缺少跟踪号 ${missingTracking} 箱。`,
       `物流商：${topProviders || "暂无"}`,
@@ -136,8 +139,16 @@ export function TransferControlTower({ report, onSendToAssistant }: Props) {
       </div>
 
       <div className="ct-filters">
-        <div className="ct-months">
-          {["全部", ...months].map((month) => <button key={month} className={filters.month === month ? "active" : ""} onClick={() => setFilters((current) => ({ ...current, month }))}>{month === "全部" ? "全部月份" : month.replace("-", "/")}</button>)}
+        <div className="ct-period-row">
+          <div className="ct-months">
+            {["全部", ...months].map((month) => <button key={month} className={filters.month === month ? "active" : ""} onClick={() => setFilters((current) => ({ ...current, month, dateFrom: "", dateTo: "" }))}>{month === "全部" ? "全部月份" : month.replace("-", "/")}</button>)}
+          </div>
+          <div className="ct-date-range">
+            <b>提货日期</b>
+            <label><span>开始</span><input type="date" value={filters.dateFrom} max={filters.dateTo || undefined} onChange={(event) => setFilters((current) => ({ ...current, month: "全部", dateFrom: event.target.value }))} /></label>
+            <i>至</i>
+            <label><span>结束</span><input type="date" value={filters.dateTo} min={filters.dateFrom || undefined} onChange={(event) => setFilters((current) => ({ ...current, month: "全部", dateTo: event.target.value }))} /></label>
+          </div>
         </div>
         <div className="ct-filter-row">
           {(["category", "team", "provider", "transport", "origin", "destination"] as const).map((key) => (

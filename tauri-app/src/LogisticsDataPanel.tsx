@@ -35,6 +35,17 @@ interface FeishuSheet {
   grid_properties?: { row_count?: number; column_count?: number };
 }
 
+interface FeishuBaseTable {
+  table_id: string;
+  name: string;
+}
+
+interface BaseSourceConfig {
+  url: string;
+  tableId: string;
+  viewId: string;
+}
+
 interface SourceConfig {
   name: string;
   url: string;
@@ -98,6 +109,7 @@ interface LogisticsDataPanelProps {
 }
 
 const SOURCE_KEY = "ht-feishu-logistics-source";
+const BASE_SOURCE_KEY = "ht-feishu-logistics-base-source";
 const EMPTY_MAPPING: FieldMapping = { customer: "", status: "", amount: "", date: "", tracking: "", route: "" };
 
 const MAPPING_FIELDS: Array<{ key: keyof FieldMapping; label: string; hint: string }> = [
@@ -122,6 +134,20 @@ function loadSource(): SourceConfig {
     }
   } catch { /* ignore invalid local preferences */ }
   return { name: "", url: "", sheetId: "", range: "" };
+}
+
+function loadBaseSource(): BaseSourceConfig {
+  try {
+    const stored = JSON.parse(localStorage.getItem(BASE_SOURCE_KEY) || "null");
+    if (stored && typeof stored.url === "string") {
+      return {
+        url: stored.url,
+        tableId: typeof stored.tableId === "string" ? stored.tableId : "",
+        viewId: typeof stored.viewId === "string" ? stored.viewId : "",
+      };
+    }
+  } catch { /* ignore invalid local preferences */ }
+  return { url: "", tableId: "", viewId: "" };
 }
 
 function sheetId(sheet: FeishuSheet): string {
@@ -151,18 +177,22 @@ function kindLabel(kind: string): string {
 export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProps) {
   const [connection, setConnection] = useState<FeishuConnection>({ configured: false, appId: null });
   const [showCredentials, setShowCredentials] = useState(false);
+  const [showBaseSource, setShowBaseSource] = useState(true);
   const [showSheetSource, setShowSheetSource] = useState(false);
   const [appId, setAppId] = useState("");
   const [appSecret, setAppSecret] = useState("");
   const [source, setSource] = useState<SourceConfig>(loadSource);
+  const [baseSource, setBaseSource] = useState<BaseSourceConfig>(loadBaseSource);
   const [sheets, setSheets] = useState<FeishuSheet[]>([]);
+  const [baseTables, setBaseTables] = useState<FeishuBaseTable[]>([]);
   const [mapping, setMapping] = useState<FieldMapping>(EMPTY_MAPPING);
   const [rawValues, setRawValues] = useState<unknown[][] | null>(null);
   const [report, setReport] = useState<LogisticsReport | null>(null);
   const [towerReport, setTowerReport] = useState<TransferControlTowerReport | null>(null);
   const [localFile, setLocalFile] = useState<File | null>(null);
+  const [activeSource, setActiveSource] = useState<"local" | "base" | "sheet" | null>(null);
   const [lastSync, setLastSync] = useState<number | null>(null);
-  const [loading, setLoading] = useState<"credentials" | "sheets" | "sync" | "analyze" | "workbook" | null>(null);
+  const [loading, setLoading] = useState<"credentials" | "sheets" | "base-tables" | "sync" | "analyze" | "workbook" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -179,6 +209,10 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
   useEffect(() => {
     localStorage.setItem(SOURCE_KEY, JSON.stringify(source));
   }, [source]);
+
+  useEffect(() => {
+    localStorage.setItem(BASE_SOURCE_KEY, JSON.stringify(baseSource));
+  }, [baseSource]);
 
   const columns = report?.columns.map((column) => column.name) || [];
   const mappedCount = useMemo(() => Object.values(mapping).filter(Boolean).length, [mapping]);
@@ -237,8 +271,32 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
     setConnection({ configured: false, appId: null });
     setAppSecret("");
     setSheets([]);
+    setBaseTables([]);
     setShowCredentials(true);
   }, []);
+
+  const loadBaseTables = useCallback(async () => {
+    if (!baseSource.url.trim()) {
+      setError("请先粘贴飞书多维表格链接");
+      return;
+    }
+    setLoading("base-tables");
+    setError(null);
+    try {
+      const result = await invoke<{ tables: FeishuBaseTable[]; tableId?: string | null; viewId?: string | null }>("feishu_list_base_tables", { baseUrl: baseSource.url });
+      const tables = Array.isArray(result.tables) ? result.tables : [];
+      setBaseTables(tables);
+      const preferred = result.tableId && tables.some((table) => table.table_id === result.tableId)
+        ? result.tableId
+        : tables.find((table) => table.name === "调拨时效表（箱维度）")?.table_id || tables[0]?.table_id || "";
+      setBaseSource((current) => ({ ...current, tableId: preferred, viewId: result.viewId || current.viewId }));
+      if (!tables.length) setError("连接成功，但这个多维表格中没有可读取的数据表");
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setLoading(null);
+    }
+  }, [baseSource.url]);
 
   const loadSheets = useCallback(async () => {
     if (!source.url.trim()) {
@@ -280,12 +338,51 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
       const nextMapping = autoMapping(headers);
       setRawValues(values);
       setMapping(nextMapping);
+      setTowerReport(null);
+      setLocalFile(null);
+      setActiveSource("sheet");
       await analyze(values, nextMapping, source.name || "飞书表格");
     } catch (reason) {
       setError(String(reason));
       setLoading(null);
     }
   }, [analyze, source]);
+
+  const syncBase = useCallback(async () => {
+    if (!baseSource.url.trim() || !baseSource.tableId) {
+      setError("请先读取并选择多维表格中的数据表");
+      return;
+    }
+    setLoading("sync");
+    setError(null);
+    try {
+      const selected = baseTables.find((table) => table.table_id === baseSource.tableId);
+      const result = await invoke<{ values: unknown[][]; tableName?: string }>("feishu_fetch_base", {
+        baseUrl: baseSource.url,
+        tableId: baseSource.tableId,
+        viewId: baseSource.viewId || null,
+        tableName: selected?.name || "飞书多维表格",
+      });
+      const values = Array.isArray(result.values) ? result.values : [];
+      const baseUrl = await sidecarUrl();
+      const response = await fetch(`${baseUrl}/api/logistics-data/control-tower/values`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ values, source_name: result.tableName || selected?.name || "飞书多维表格" }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || `分析服务返回 ${response.status}`);
+      setTowerReport(payload as TransferControlTowerReport);
+      setReport(null);
+      setLocalFile(null);
+      setActiveSource("base");
+      setLastSync(Date.now());
+    } catch (reason) {
+      setError(`同步飞书多维表格失败：${String(reason)}`);
+    } finally {
+      setLoading(null);
+    }
+  }, [baseSource, baseTables, sidecarUrl]);
 
   const applyMapping = useCallback(() => {
     if (rawValues) analyze(rawValues, mapping, report?.sourceName || source.name);
@@ -304,6 +401,7 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
       setLocalFile(file);
       setTowerReport(payload as TransferControlTowerReport);
       setReport(null);
+      setActiveSource("local");
       setLastSync(Date.now());
     } catch (reason) {
       setError(`读取 Excel 失败：${String(reason)}`);
@@ -347,7 +445,7 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
           </button>
         </section>
 
-        <div className="data-sidebar-label">飞书连接（后续同步）</div>
+        <div className="data-sidebar-label">飞书数据源</div>
 
         <section className={`data-connection ${connection.configured ? "connected" : ""}`}>
           <div>
@@ -369,6 +467,24 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
             </div>
           </section>
         )}
+
+        <button className="data-sidebar-toggle" type="button" onClick={() => setShowBaseSource((value) => !value)}>
+          <span>多维表格</span><ChevronDown className={showBaseSource ? "open" : ""} size={14} />
+        </button>
+        {showBaseSource && <section className="data-source-form data-base-source">
+          <label><span>Wiki / Base 链接</span><div className="data-input-with-icon"><Link2 size={14} /><input value={baseSource.url} onChange={(event) => setBaseSource({ url: event.target.value, tableId: "", viewId: "" })} placeholder="粘贴飞书多维表格链接" /></div></label>
+          <button className="data-secondary-button" type="button" onClick={loadBaseTables} disabled={!connection.configured || loading === "base-tables"}>
+            {loading === "base-tables" ? <LoaderCircle className="spin" size={15} /> : <CloudDownload size={15} />}
+            检查权限并读取数据表
+          </button>
+          <label><span>数据表</span><select value={baseSource.tableId} onChange={(event) => setBaseSource((current) => ({ ...current, tableId: event.target.value }))} disabled={!baseTables.length}>
+            <option value="">{baseTables.length ? "选择数据表" : "连接后显示"}</option>
+            {baseTables.map((table) => <option key={table.table_id} value={table.table_id}>{table.name}</option>)}
+          </select></label>
+          <button className="data-primary-button compact" type="button" onClick={syncBase} disabled={!connection.configured || !baseSource.tableId || loading === "sync"}>
+            {loading === "sync" ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}同步到控制塔
+          </button>
+        </section>}
 
         <button className="data-sidebar-toggle" type="button" onClick={() => setShowSheetSource((value) => !value)}>
           <span>普通电子表格</span><ChevronDown className={showSheetSource ? "open" : ""} size={14} />
@@ -395,12 +511,12 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
           <div>
             <span className="data-eyebrow">LOGISTICS INTELLIGENCE</span>
             <h1>{towerReport ? "调拨时效控制塔" : (report?.sourceName || "物流数据分析")}</h1>
-            <p>{towerReport ? `${towerReport.sourceName} · 箱维度数据 · 筛选、异常和物流商绩效联动` : (report ? report.summary : "选择调拨时效 Excel，或从飞书表格同步业务数据。")}</p>
+            <p>{towerReport ? `${towerReport.sourceName} · 箱维度数据 · 日期筛选、异常和物流商绩效联动` : (report ? report.summary : "选择调拨时效 Excel，或从飞书多维表格同步业务数据。")}</p>
           </div>
           <div className="data-header-actions">
             {lastSync && <span className="data-last-sync"><CheckCircle2 size={14} />{new Date(lastSync).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 已更新</span>}
-            <button className="data-primary-button" type="button" onClick={() => localFile ? loadWorkbook(localFile) : sync()} disabled={localFile ? Boolean(loading) : (!connection.configured || !source.sheetId || Boolean(loading))}>
-              {loading === "sync" || loading === "analyze" || loading === "workbook" ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}{localFile ? "重新读取" : "立即同步"}
+            <button className="data-primary-button" type="button" onClick={() => activeSource === "local" && localFile ? loadWorkbook(localFile) : activeSource === "base" ? syncBase() : sync()} disabled={Boolean(loading) || (activeSource === "local" ? !localFile : activeSource === "base" ? !baseSource.tableId : !connection.configured || !source.sheetId)}>
+              {loading === "sync" || loading === "analyze" || loading === "workbook" ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}{activeSource === "local" ? "重新读取" : "立即同步"}
             </button>
           </div>
         </header>
@@ -489,7 +605,7 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
           </div>
         ) : null}
 
-        <footer className="data-page-footer"><ShieldCheck size={13} />{towerReport ? "本地只读解析 · 源文件不会上传云端" : "只读访问 · 凭据保存在 Windows 凭据库"}{!towerReport && <> · <button type="button" onClick={() => window.open("https://open.feishu.cn/app", "_blank")}><ExternalLink size={12} />飞书开放平台</button></>}</footer>
+        <footer className="data-page-footer"><ShieldCheck size={13} />{activeSource === "local" ? "本地只读解析 · 源文件不会上传云端" : "飞书只读访问 · 凭据保存在 Windows 凭据库"}{activeSource !== "local" && <> · <button type="button" onClick={() => window.open("https://open.feishu.cn/app", "_blank")}><ExternalLink size={12} />飞书开放平台</button></>}</footer>
       </section>
     </>
   );

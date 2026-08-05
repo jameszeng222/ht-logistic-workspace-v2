@@ -35,6 +35,11 @@ class LogisticsDataRequest(BaseModel):
     source_name: str = "飞书表格"
 
 
+class TransferControlTowerRequest(BaseModel):
+    values: list[list[object]] = Field(default_factory=list)
+    source_name: str = "飞书多维表格"
+
+
 class EmailMonitorRequest(BaseModel):
     accounts: list[dict[str, object]] = Field(default_factory=list)
 
@@ -128,6 +133,21 @@ async def build_logistics_control_tower(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"读取调拨数据失败：{e}")
+
+
+@app.post("/api/logistics-data/control-tower/values")
+async def build_logistics_control_tower_from_values(request: TransferControlTowerRequest):
+    """Build the same control tower from values securely retrieved from Feishu Base."""
+    try:
+        return await run_in_threadpool(
+            transfer_control_tower.parse_values,
+            request.values,
+            request.source_name,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取飞书调拨数据失败：{e}")
 
 
 @app.post("/api/email-monitor/scan")

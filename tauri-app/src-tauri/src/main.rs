@@ -51,6 +51,22 @@ struct FeishuCredentials {
     app_secret: String,
 }
 
+#[derive(Debug, PartialEq)]
+struct FeishuBaseReference {
+    token: String,
+    is_wiki: bool,
+    table_id: Option<String>,
+    view_id: Option<String>,
+}
+
+const TRANSFER_BASE_FIELDS: &[&str] = &[
+    "调拨单号", "箱号（赫特）", "物流商", "提货时间", "物流签收时间", "上架时间",
+    "时效要求", "签出-签收时效", "是否异常", "是否物流异常", "是否上架异常",
+    "发货仓库", "目的仓库", "团队", "物流渠道", "运输类型", "尾程类型", "物流跟踪号",
+    "一级分类", "物流状态（细分）", "物流状态", "状态与异常核实",
+    "异常事件描述（物流商填写）", "预计签收时间", "预计上架时间",
+];
+
 fn feishu_keyring_entry() -> Result<keyring::Entry, String> {
     keyring::Entry::new(FEISHU_KEYRING_SERVICE, FEISHU_KEYRING_USER)
         .map_err(|e| format!("无法访问 Windows 凭据库：{e}"))
@@ -83,6 +99,35 @@ fn parse_feishu_spreadsheet_token(input: &str) -> Result<String, String> {
     Err("无法从链接中识别飞书表格 token".into())
 }
 
+fn parse_feishu_base_reference(input: &str) -> Result<FeishuBaseReference, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("请输入飞书多维表格链接".into());
+    }
+    if trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return Ok(FeishuBaseReference {
+            token: trimmed.to_string(),
+            is_wiki: false,
+            table_id: None,
+            view_id: None,
+        });
+    }
+    let url = reqwest::Url::parse(trimmed).map_err(|_| "飞书多维表格链接格式无效".to_string())?;
+    let segments: Vec<_> = url.path_segments().map(|value| value.collect()).unwrap_or_default();
+    let (token, is_wiki) = segments.windows(2).find_map(|pair| match pair[0] {
+        "base" => Some((pair[1].to_string(), false)),
+        "wiki" => Some((pair[1].to_string(), true)),
+        _ => None,
+    }).ok_or_else(|| "链接中没有识别到飞书 Base 或 Wiki token".to_string())?;
+    let query = |name: &str| url.query_pairs().find(|(key, _)| key == name).map(|(_, value)| value.into_owned());
+    Ok(FeishuBaseReference {
+        token,
+        is_wiki,
+        table_id: query("table"),
+        view_id: query("view"),
+    })
+}
+
 fn feishu_api_error(payload: &serde_json::Value) -> Option<String> {
     let code = payload.get("code").and_then(|value| value.as_i64()).unwrap_or(0);
     if code == 0 {
@@ -90,6 +135,12 @@ fn feishu_api_error(payload: &serde_json::Value) -> Option<String> {
     }
     let msg = payload.get("msg").and_then(|value| value.as_str()).unwrap_or("请求失败");
     let action = match code {
+        131005 | 131006 => "请给飞书应用开通知识库节点读取权限，并把应用添加为该知识库或多维表格的协作者",
+        1254030 => "返回数据过大，请缩小读取范围后重试",
+        1254040 => "多维表格不存在，或 Wiki 链接没有正确解析",
+        1254041 => "数据表不存在，请重新选择数据表",
+        1254290 => "请求过于频繁，请稍后重试",
+        1254302 => "请把飞书应用添加为该多维表格的协作者，并授予可查看权限",
         1310213 => "请确认应用已开通电子表格只读权限，并已被添加为该表格的协作者",
         1310214 => "请检查表格链接是否正确，或表格是否已被删除",
         1310215 | 1310211 => "请重新选择工作表",
@@ -97,6 +148,40 @@ fn feishu_api_error(payload: &serde_json::Value) -> Option<String> {
         _ => "请检查飞书应用配置与表格权限",
     };
     Some(format!("飞书接口错误 {code}：{msg}。{action}"))
+}
+
+async fn resolve_feishu_base_reference(
+    client: &reqwest::Client,
+    access_token: &str,
+    input: &str,
+) -> Result<FeishuBaseReference, String> {
+    let mut reference = parse_feishu_base_reference(input)?;
+    if !reference.is_wiki {
+        return Ok(reference);
+    }
+    let mut url = reqwest::Url::parse("https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node")
+        .map_err(|e| e.to_string())?;
+    url.query_pairs_mut().append_pair("token", &reference.token);
+    let payload: serde_json::Value = client
+        .get(url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|e| format!("解析飞书 Wiki 链接失败：{e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("解析飞书 Wiki 响应失败：{e}"))?;
+    if let Some(error) = feishu_api_error(&payload) {
+        return Err(error);
+    }
+    let node = payload.pointer("/data/node").ok_or_else(|| "飞书 Wiki 响应中缺少节点信息".to_string())?;
+    if node.get("obj_type").and_then(|value| value.as_str()) != Some("bitable") {
+        return Err("这个 Wiki 链接不是多维表格".into());
+    }
+    reference.token = node.get("obj_token").and_then(|value| value.as_str()).map(str::to_string)
+        .ok_or_else(|| "飞书 Wiki 节点中缺少多维表格 token".to_string())?;
+    reference.is_wiki = false;
+    Ok(reference)
 }
 
 async fn feishu_tenant_token(client: &reqwest::Client, credentials: &FeishuCredentials) -> Result<String, String> {
@@ -221,6 +306,122 @@ async fn feishu_fetch_sheet(
         "range": payload.pointer("/data/valueRange/range").cloned().unwrap_or_else(|| serde_json::json!(value_range)),
         "revision": payload.pointer("/data/revision").cloned().unwrap_or(serde_json::Value::Null),
         "values": values,
+    }))
+}
+
+#[tauri::command]
+async fn feishu_list_base_tables(base_url: String) -> Result<serde_json::Value, String> {
+    let credentials = load_feishu_credentials()?;
+    let client = reqwest::Client::new();
+    let access_token = feishu_tenant_token(&client, &credentials).await?;
+    let reference = resolve_feishu_base_reference(&client, &access_token, &base_url).await?;
+    let mut url = reqwest::Url::parse(&format!(
+        "https://open.feishu.cn/open-apis/bitable/v1/apps/{}/tables",
+        reference.token
+    )).map_err(|e| e.to_string())?;
+    url.query_pairs_mut().append_pair("page_size", "100");
+    let payload: serde_json::Value = client
+        .get(url)
+        .bearer_auth(&access_token)
+        .send()
+        .await
+        .map_err(|e| format!("读取飞书多维表格失败：{e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("解析飞书多维表格响应失败：{e}"))?;
+    if let Some(error) = feishu_api_error(&payload) {
+        return Err(error);
+    }
+    Ok(serde_json::json!({
+        "baseToken": reference.token,
+        "tableId": reference.table_id,
+        "viewId": reference.view_id,
+        "tables": payload.pointer("/data/items").cloned().unwrap_or_else(|| serde_json::json!([])),
+    }))
+}
+
+#[tauri::command]
+async fn feishu_fetch_base(
+    base_url: String,
+    table_id: String,
+    view_id: Option<String>,
+    table_name: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let table_id = table_id.trim().to_string();
+    if table_id.is_empty() {
+        return Err("请先选择多维表格中的数据表".into());
+    }
+    let credentials = load_feishu_credentials()?;
+    let client = reqwest::Client::new();
+    let access_token = feishu_tenant_token(&client, &credentials).await?;
+    let reference = resolve_feishu_base_reference(&client, &access_token, &base_url).await?;
+
+    let mut available_fields = Vec::new();
+    let mut field_page_token: Option<String> = None;
+    loop {
+        let mut url = reqwest::Url::parse(&format!(
+            "https://open.feishu.cn/open-apis/bitable/v1/apps/{}/tables/{}/fields",
+            reference.token, table_id
+        )).map_err(|e| e.to_string())?;
+        url.query_pairs_mut().append_pair("page_size", "100");
+        if let Some(token) = field_page_token.as_deref() {
+            url.query_pairs_mut().append_pair("page_token", token);
+        }
+        let payload: serde_json::Value = client.get(url).bearer_auth(&access_token).send().await
+            .map_err(|e| format!("读取多维表格字段失败：{e}"))?.json().await
+            .map_err(|e| format!("解析多维表格字段失败：{e}"))?;
+        if let Some(error) = feishu_api_error(&payload) { return Err(error); }
+        if let Some(items) = payload.pointer("/data/items").and_then(|value| value.as_array()) {
+            available_fields.extend(items.iter().filter_map(|item| item.get("field_name").and_then(|value| value.as_str()).map(str::to_string)));
+        }
+        let has_more = payload.pointer("/data/has_more").and_then(|value| value.as_bool()).unwrap_or(false);
+        field_page_token = payload.pointer("/data/page_token").and_then(|value| value.as_str()).map(str::to_string);
+        if !has_more || field_page_token.is_none() { break; }
+    }
+    let fields: Vec<String> = TRANSFER_BASE_FIELDS.iter().filter(|name| available_fields.iter().any(|field| field == **name)).map(|name| (*name).to_string()).collect();
+    if fields.is_empty() {
+        return Err("选中的数据表没有识别到调拨时效字段".into());
+    }
+
+    let mut rows: Vec<Vec<serde_json::Value>> = Vec::new();
+    rows.push(fields.iter().map(|field| serde_json::Value::String(field.clone())).collect());
+    let mut record_page_token: Option<String> = None;
+    loop {
+        let mut url = reqwest::Url::parse(&format!(
+            "https://open.feishu.cn/open-apis/bitable/v1/apps/{}/tables/{}/records",
+            reference.token, table_id
+        )).map_err(|e| e.to_string())?;
+        url.query_pairs_mut().append_pair("page_size", "500");
+        let encoded_fields = serde_json::to_string(&fields).map_err(|e| e.to_string())?;
+        url.query_pairs_mut().append_pair("field_names", &encoded_fields);
+        if let Some(token) = record_page_token.as_deref() {
+            url.query_pairs_mut().append_pair("page_token", token);
+        }
+        let selected_view = view_id.as_deref().filter(|value| !value.trim().is_empty()).or(reference.view_id.as_deref());
+        if let Some(value) = selected_view {
+            url.query_pairs_mut().append_pair("view_id", value);
+        }
+        let payload: serde_json::Value = client.get(url).bearer_auth(&access_token).send().await
+            .map_err(|e| format!("读取多维表格记录失败：{e}"))?.json().await
+            .map_err(|e| format!("解析多维表格记录失败：{e}"))?;
+        if let Some(error) = feishu_api_error(&payload) { return Err(error); }
+        if let Some(items) = payload.pointer("/data/items").and_then(|value| value.as_array()) {
+            for item in items {
+                let record_fields = item.get("fields").and_then(|value| value.as_object());
+                rows.push(fields.iter().map(|field| {
+                    record_fields.and_then(|values| values.get(field)).cloned().unwrap_or(serde_json::Value::Null)
+                }).collect());
+            }
+        }
+        let has_more = payload.pointer("/data/has_more").and_then(|value| value.as_bool()).unwrap_or(false);
+        record_page_token = payload.pointer("/data/page_token").and_then(|value| value.as_str()).map(str::to_string);
+        if !has_more || record_page_token.is_none() { break; }
+    }
+    Ok(serde_json::json!({
+        "baseToken": reference.token,
+        "tableId": table_id,
+        "tableName": table_name.unwrap_or_else(|| "飞书多维表格".to_string()),
+        "values": rows,
     }))
 }
 
@@ -2254,7 +2455,7 @@ async fn path_exists(path: String) -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_models_config, parse_feishu_spreadsheet_token};
+    use super::{normalize_models_config, parse_feishu_base_reference, parse_feishu_spreadsheet_token, FeishuBaseReference};
 
     #[test]
     fn model_config_normalization_adds_safe_cost_defaults() {
@@ -2280,6 +2481,23 @@ mod tests {
         );
         assert_eq!(parse_feishu_spreadsheet_token("shtcnPlainToken").unwrap(), "shtcnPlainToken");
         assert!(parse_feishu_spreadsheet_token("https://example.feishu.cn/wiki/wikiToken").is_err());
+    }
+
+    #[test]
+    fn parses_feishu_base_and_wiki_links() {
+        assert_eq!(
+            parse_feishu_base_reference("https://example.feishu.cn/wiki/wikiToken?table=tblOne&view=vewOne").unwrap(),
+            FeishuBaseReference {
+                token: "wikiToken".into(),
+                is_wiki: true,
+                table_id: Some("tblOne".into()),
+                view_id: Some("vewOne".into()),
+            }
+        );
+        assert_eq!(
+            parse_feishu_base_reference("https://example.feishu.cn/base/baseToken").unwrap().token,
+            "baseToken"
+        );
     }
 }
 
@@ -2309,7 +2527,7 @@ fn main() {
             get_models_config, save_models_config, apply_models_config, test_model_connection,
             list_dir, open_file, get_agent_paths, path_exists,
             save_feishu_credentials, get_feishu_connection, clear_feishu_credentials,
-            feishu_list_sheets, feishu_fetch_sheet,
+            feishu_list_sheets, feishu_fetch_sheet, feishu_list_base_tables, feishu_fetch_base,
             save_email_credentials, get_email_connections, clear_email_credentials,
             email_monitor_scan
         ])

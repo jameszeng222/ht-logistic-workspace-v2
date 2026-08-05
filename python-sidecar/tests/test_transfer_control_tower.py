@@ -4,7 +4,7 @@ import unittest
 
 from openpyxl import Workbook
 
-from tools.transfer_control_tower import parse_workbook
+from tools.transfer_control_tower import parse_values, parse_workbook
 
 
 def workbook_bytes(rows):
@@ -38,6 +38,27 @@ class TransferControlTowerTests(unittest.TestCase):
         data = workbook_bytes([["调拨单号"], ["DB001"]])
         with self.assertRaisesRegex(ValueError, "缺少必要字段"):
             parse_workbook(data, "transfer.xlsx")
+
+    def test_normalizes_feishu_base_matrix_values(self):
+        values = [
+            ["调拨单号", "箱号（赫特）", "物流商", "提货时间", "一级分类", "时效要求", "签出-签收时效"],
+            [
+                [{"text": "DB003", "type": "text"}],
+                "B3",
+                "九方",
+                1783296000000,
+                [{"text": "假发", "type": "text"}],
+                10,
+                8,
+            ],
+        ]
+
+        result = parse_values(values, "调拨时效表", now=datetime(2026, 7, 15))
+
+        self.assertEqual(result["sourceName"], "调拨时效表")
+        self.assertEqual(result["records"][0]["order"], "DB003")
+        self.assertEqual(result["records"][0]["category"], "假发")
+        self.assertTrue(result["records"][0]["ontime"])
 
 
 if __name__ == "__main__":
