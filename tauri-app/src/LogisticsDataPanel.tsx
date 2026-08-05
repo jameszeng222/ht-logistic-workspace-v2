@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { TransferControlTower, type TransferControlTowerReport } from "./TransferControlTower";
+import { deleteDashboardSnapshot, loadDashboardSnapshot, saveDashboardSnapshot } from "./dashboardStorage";
 import {
   AlertTriangle,
   BarChart3,
@@ -13,6 +14,7 @@ import {
   KeyRound,
   Link2,
   LoaderCircle,
+  Plus,
   RefreshCw,
   Save,
   Send,
@@ -43,7 +45,17 @@ interface FeishuBaseTable {
 interface BaseSourceConfig {
   url: string;
   tableId: string;
+  tableName: string;
   viewId: string;
+}
+
+interface TransferDashboardConfig {
+  id: string;
+  name: string;
+  source: BaseSourceConfig;
+  autoSync: boolean;
+  intervalMinutes: number;
+  lastSync: number | null;
 }
 
 interface SourceConfig {
@@ -110,6 +122,8 @@ interface LogisticsDataPanelProps {
 
 const SOURCE_KEY = "ht-feishu-logistics-source";
 const BASE_SOURCE_KEY = "ht-feishu-logistics-base-source";
+const DASHBOARDS_KEY = "ht-transfer-dashboards-v1";
+const ACTIVE_DASHBOARD_KEY = "ht-transfer-active-dashboard-v1";
 const EMPTY_MAPPING: FieldMapping = { customer: "", status: "", amount: "", date: "", tracking: "", route: "" };
 
 const MAPPING_FIELDS: Array<{ key: keyof FieldMapping; label: string; hint: string }> = [
@@ -143,11 +157,47 @@ function loadBaseSource(): BaseSourceConfig {
       return {
         url: stored.url,
         tableId: typeof stored.tableId === "string" ? stored.tableId : "",
+        tableName: typeof stored.tableName === "string" ? stored.tableName : "",
         viewId: typeof stored.viewId === "string" ? stored.viewId : "",
       };
     }
   } catch { /* ignore invalid local preferences */ }
-  return { url: "", tableId: "", viewId: "" };
+  return { url: "", tableId: "", tableName: "", viewId: "" };
+}
+
+function dashboardId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `dashboard-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function loadDashboards(): TransferDashboardConfig[] {
+  try {
+    const stored = JSON.parse(localStorage.getItem(DASHBOARDS_KEY) || "null");
+    if (Array.isArray(stored) && stored.length) {
+      return stored.map((item, index) => ({
+        id: typeof item.id === "string" ? item.id : dashboardId(),
+        name: typeof item.name === "string" && item.name.trim() ? item.name : `调拨数据看板 ${index + 1}`,
+        source: {
+          url: typeof item.source?.url === "string" ? item.source.url : "",
+          tableId: typeof item.source?.tableId === "string" ? item.source.tableId : "",
+          tableName: typeof item.source?.tableName === "string" ? item.source.tableName : "",
+          viewId: typeof item.source?.viewId === "string" ? item.source.viewId : "",
+        },
+        autoSync: item.autoSync !== false,
+        intervalMinutes: [15, 30, 60, 180, 360].includes(Number(item.intervalMinutes)) ? Number(item.intervalMinutes) : 60,
+        lastSync: typeof item.lastSync === "number" ? item.lastSync : null,
+      }));
+    }
+  } catch { /* migrate to a default dashboard */ }
+  return [{
+    id: dashboardId(),
+    name: "调拨数据看板",
+    source: loadBaseSource(),
+    autoSync: true,
+    intervalMinutes: 60,
+    lastSync: null,
+  }];
 }
 
 function sheetId(sheet: FeishuSheet): string {
@@ -175,6 +225,12 @@ function kindLabel(kind: string): string {
 }
 
 export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProps) {
+  const [dashboards, setDashboards] = useState<TransferDashboardConfig[]>(loadDashboards);
+  const [activeDashboardId, setActiveDashboardId] = useState(() => {
+    const stored = localStorage.getItem(ACTIVE_DASHBOARD_KEY);
+    return dashboards.some((dashboard) => dashboard.id === stored) ? stored as string : dashboards[0].id;
+  });
+  const activeDashboard = dashboards.find((dashboard) => dashboard.id === activeDashboardId) || dashboards[0];
   const [connection, setConnection] = useState<FeishuConnection>({ configured: false, appId: null });
   const [showCredentials, setShowCredentials] = useState(false);
   const [showBaseSource, setShowBaseSource] = useState(true);
@@ -182,7 +238,7 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
   const [appId, setAppId] = useState("");
   const [appSecret, setAppSecret] = useState("");
   const [source, setSource] = useState<SourceConfig>(loadSource);
-  const [baseSource, setBaseSource] = useState<BaseSourceConfig>(loadBaseSource);
+  const [baseSource, setBaseSource] = useState<BaseSourceConfig>(activeDashboard.source);
   const [sheets, setSheets] = useState<FeishuSheet[]>([]);
   const [baseTables, setBaseTables] = useState<FeishuBaseTable[]>([]);
   const [mapping, setMapping] = useState<FieldMapping>(EMPTY_MAPPING);
@@ -191,10 +247,20 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
   const [towerReport, setTowerReport] = useState<TransferControlTowerReport | null>(null);
   const [localFile, setLocalFile] = useState<File | null>(null);
   const [activeSource, setActiveSource] = useState<"local" | "base" | "sheet" | null>(null);
-  const [lastSync, setLastSync] = useState<number | null>(null);
+  const [lastSync, setLastSync] = useState<number | null>(activeDashboard.lastSync);
   const [loading, setLoading] = useState<"credentials" | "sheets" | "base-tables" | "sync" | "analyze" | "workbook" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const syncingRef = useRef(false);
+  const activeDashboardIdRef = useRef(activeDashboardId);
+  const baseSourceDashboardIdRef = useRef(activeDashboardId);
+  const dashboardsRef = useRef(dashboards);
+
+  const updateActiveDashboard = useCallback((patch: Partial<TransferDashboardConfig>) => {
+    setDashboards((current) => current.map((dashboard) => (
+      dashboard.id === activeDashboardId ? { ...dashboard, ...patch } : dashboard
+    )));
+  }, [activeDashboardId]);
 
   useEffect(() => {
     invoke<FeishuConnection>("get_feishu_connection")
@@ -212,7 +278,37 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
 
   useEffect(() => {
     localStorage.setItem(BASE_SOURCE_KEY, JSON.stringify(baseSource));
-  }, [baseSource]);
+    if (baseSourceDashboardIdRef.current !== activeDashboardId) return;
+    updateActiveDashboard({ source: baseSource });
+  }, [activeDashboardId, baseSource, updateActiveDashboard]);
+
+  useEffect(() => {
+    localStorage.setItem(DASHBOARDS_KEY, JSON.stringify(dashboards));
+    dashboardsRef.current = dashboards;
+  }, [dashboards]);
+
+  useEffect(() => {
+    activeDashboardIdRef.current = activeDashboardId;
+    localStorage.setItem(ACTIVE_DASHBOARD_KEY, activeDashboardId);
+    const dashboard = dashboards.find((item) => item.id === activeDashboardId) || dashboards[0];
+    baseSourceDashboardIdRef.current = activeDashboardId;
+    setBaseSource(dashboard.source);
+    setBaseTables([]);
+    setLastSync(dashboard.lastSync);
+    setTowerReport(null);
+    setReport(null);
+    setLocalFile(null);
+    setActiveSource(dashboard.source.tableId ? "base" : null);
+    setError(null);
+    loadDashboardSnapshot<TransferControlTowerReport>(activeDashboardId)
+      .then((snapshot) => {
+        if (!snapshot || activeDashboardIdRef.current !== activeDashboardId) return;
+        setTowerReport(snapshot.report);
+        setActiveSource(snapshot.sourceType);
+        setLastSync(snapshot.savedAt);
+      })
+      .catch(() => { /* a missing local snapshot should not block live sync */ });
+  }, [activeDashboardId]);
 
   const columns = report?.columns.map((column) => column.name) || [];
   const mappedCount = useMemo(() => Object.values(mapping).filter(Boolean).length, [mapping]);
@@ -224,6 +320,41 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
     } catch {
       return "http://127.0.0.1:8000";
     }
+  }, []);
+
+  const createDashboard = useCallback(() => {
+    const next: TransferDashboardConfig = {
+      id: dashboardId(),
+      name: `调拨数据看板 ${dashboards.length + 1}`,
+      source: { url: "", tableId: "", tableName: "", viewId: "" },
+      autoSync: true,
+      intervalMinutes: 60,
+      lastSync: null,
+    };
+    setDashboards((current) => [...current, next]);
+    setActiveDashboardId(next.id);
+    setShowBaseSource(true);
+  }, [dashboards.length]);
+
+  const removeDashboard = useCallback(async () => {
+    if (dashboards.length <= 1) return;
+    const index = dashboards.findIndex((dashboard) => dashboard.id === activeDashboardId);
+    const fallback = dashboards[Math.max(0, index - 1)] || dashboards[0];
+    setDashboards((current) => current.filter((dashboard) => dashboard.id !== activeDashboardId));
+    setActiveDashboardId(fallback.id);
+    try { await deleteDashboardSnapshot(activeDashboardId); } catch { /* best effort */ }
+  }, [activeDashboardId, dashboards]);
+
+  const persistTowerReport = useCallback(async (
+    nextReport: TransferControlTowerReport,
+    sourceType: "base" | "local",
+    savedAt: number,
+    targetDashboardId: string,
+  ) => {
+    await saveDashboardSnapshot({ dashboardId: targetDashboardId, report: nextReport, sourceType, savedAt });
+    setDashboards((current) => current.map((dashboard) => (
+      dashboard.id === targetDashboardId ? { ...dashboard, lastSync: savedAt } : dashboard
+    )));
   }, []);
 
   const analyze = useCallback(async (values: unknown[][], nextMapping: FieldMapping, sourceName: string) => {
@@ -289,7 +420,8 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
       const preferred = result.tableId && tables.some((table) => table.table_id === result.tableId)
         ? result.tableId
         : tables.find((table) => table.name === "调拨时效表（箱维度）")?.table_id || tables[0]?.table_id || "";
-      setBaseSource((current) => ({ ...current, tableId: preferred, viewId: result.viewId || current.viewId }));
+      const preferredName = tables.find((table) => table.table_id === preferred)?.name || "";
+      setBaseSource((current) => ({ ...current, tableId: preferred, tableName: preferredName, viewId: result.viewId || current.viewId }));
     } catch (reason) {
       setError(String(reason));
     } finally {
@@ -347,41 +479,72 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
     }
   }, [analyze, source]);
 
-  const syncBase = useCallback(async () => {
-    if (!baseSource.url.trim() || !baseSource.tableId) {
-      setError("请先读取并选择多维表格中的数据表");
+  const syncDashboard = useCallback(async (dashboard: TransferDashboardConfig, background = false) => {
+    const sourceConfig = dashboard.source;
+    const isActive = activeDashboardIdRef.current === dashboard.id;
+    if (!sourceConfig.url.trim() || !sourceConfig.tableId) {
+      if (!background && isActive) setError("请先读取并选择多维表格中的数据表");
       return;
     }
-    setLoading("sync");
-    setError(null);
+    if (syncingRef.current) return;
+    syncingRef.current = true;
+    if (!background && isActive) setLoading("sync");
+    if (isActive) setError(null);
     try {
-      const selected = baseTables.find((table) => table.table_id === baseSource.tableId);
       const result = await invoke<{ values: unknown[][]; tableName?: string }>("feishu_fetch_base", {
-        baseUrl: baseSource.url,
-        tableId: baseSource.tableId,
-        viewId: baseSource.viewId || null,
-        tableName: selected?.name || "飞书多维表格",
+        baseUrl: sourceConfig.url,
+        tableId: sourceConfig.tableId,
+        viewId: sourceConfig.viewId || null,
+        tableName: sourceConfig.tableName || dashboard.name || "飞书多维表格",
       });
       const values = Array.isArray(result.values) ? result.values : [];
       const baseUrl = await sidecarUrl();
       const response = await fetch(`${baseUrl}/api/logistics-data/control-tower/values`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ values, source_name: result.tableName || selected?.name || "飞书多维表格" }),
+        body: JSON.stringify({ values, source_name: result.tableName || sourceConfig.tableName || dashboard.name || "飞书多维表格" }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || `分析服务返回 ${response.status}`);
-      setTowerReport(payload as TransferControlTowerReport);
-      setReport(null);
-      setLocalFile(null);
-      setActiveSource("base");
-      setLastSync(Date.now());
+      const nextReport = payload as TransferControlTowerReport;
+      const syncedAt = Date.now();
+      await persistTowerReport(nextReport, "base", syncedAt, dashboard.id);
+      if (activeDashboardIdRef.current === dashboard.id) {
+        setTowerReport(nextReport);
+        setReport(null);
+        setLocalFile(null);
+        setActiveSource("base");
+        setLastSync(syncedAt);
+      }
     } catch (reason) {
-      setError(`同步飞书多维表格失败：${String(reason)}`);
+      if (activeDashboardIdRef.current === dashboard.id) setError(`同步飞书多维表格失败：${String(reason)}`);
     } finally {
-      setLoading(null);
+      syncingRef.current = false;
+      if (!background) setLoading(null);
     }
-  }, [baseSource, baseTables, sidecarUrl]);
+  }, [persistTowerReport, sidecarUrl]);
+
+  const syncBase = useCallback((background = false) => syncDashboard(activeDashboard, background), [activeDashboard, syncDashboard]);
+
+  useEffect(() => {
+    if (!connection.configured) return;
+    let cancelled = false;
+    const syncDueDashboards = async () => {
+      for (const dashboard of dashboardsRef.current) {
+        if (cancelled || !dashboard.autoSync || !dashboard.source.url || !dashboard.source.tableId) continue;
+        const interval = dashboard.intervalMinutes * 60 * 1000;
+        if (dashboard.lastSync && Date.now() - dashboard.lastSync < interval) continue;
+        await syncDashboard(dashboard, true);
+      }
+    };
+    const initialTimer = window.setTimeout(syncDueDashboards, 3_000);
+    const timer = window.setInterval(syncDueDashboards, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(initialTimer);
+      window.clearInterval(timer);
+    };
+  }, [connection.configured, syncDashboard]);
 
   const applyMapping = useCallback(() => {
     if (rawValues) analyze(rawValues, mapping, report?.sourceName || source.name);
@@ -397,17 +560,20 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
       const response = await fetch(`${baseUrl}/api/logistics-data/control-tower`, { method: "POST", body: formData });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || `读取服务返回 ${response.status}`);
+      const nextReport = payload as TransferControlTowerReport;
+      const syncedAt = Date.now();
       setLocalFile(file);
-      setTowerReport(payload as TransferControlTowerReport);
+      setTowerReport(nextReport);
       setReport(null);
       setActiveSource("local");
-      setLastSync(Date.now());
+      setLastSync(syncedAt);
+      await persistTowerReport(nextReport, "local", syncedAt, activeDashboardId);
     } catch (reason) {
       setError(`读取 Excel 失败：${String(reason)}`);
     } finally {
       setLoading(null);
     }
-  }, [sidecarUrl]);
+  }, [activeDashboardId, persistTowerReport, sidecarUrl]);
 
   const sendToAi = useCallback(() => {
     if (!report) return;
@@ -429,8 +595,16 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
       <aside className="data-source-sidebar" aria-label="物流数据源">
         <header className="data-source-heading">
           <span><Database size={18} /></span>
-          <div><strong>物流数据</strong><small>调拨时效控制塔</small></div>
+          <div><strong>物流数据</strong><small>调拨数据看板</small></div>
+          <button type="button" onClick={createDashboard} title="新建看板"><Plus size={15} /></button>
         </header>
+
+        <div className="data-dashboard-picker">
+          <select value={activeDashboardId} onChange={(event) => setActiveDashboardId(event.target.value)} aria-label="切换数据看板">
+            {dashboards.map((dashboard) => <option key={dashboard.id} value={dashboard.id}>{dashboard.name}</option>)}
+          </select>
+          {dashboards.length > 1 && <button type="button" onClick={removeDashboard} title="删除当前看板"><Trash2 size={14} /></button>}
+        </div>
 
         <section className={`data-local-source ${towerReport ? "active" : ""}`}>
           <input ref={fileInputRef} type="file" accept=".xlsx,.xls" hidden onChange={(event) => {
@@ -438,7 +612,7 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
             if (file) loadWorkbook(file);
             event.target.value = "";
           }} />
-          <div><span><FileSpreadsheet size={17} /></span><div><strong>{localFile?.name || "调拨时效 Excel"}</strong><small>{towerReport ? `${towerReport.rows.toLocaleString("zh-CN")} 箱 · 已载入` : "使用本地文件生成控制塔"}</small></div></div>
+          <div><span><FileSpreadsheet size={17} /></span><div><strong>{localFile?.name || "调拨时效 Excel"}</strong><small>{towerReport ? `${towerReport.rows.toLocaleString("zh-CN")} 箱 · 已载入` : "使用本地文件生成看板"}</small></div></div>
           <button type="button" onClick={() => fileInputRef.current?.click()} disabled={loading === "workbook"}>
             {loading === "workbook" ? <LoaderCircle className="spin" size={14} /> : <Upload size={14} />}{towerReport ? "更换" : "选择文件"}
           </button>
@@ -471,17 +645,29 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
           <span>多维表格</span><ChevronDown className={showBaseSource ? "open" : ""} size={14} />
         </button>
         {showBaseSource && <section className="data-source-form data-base-source">
-          <label><span>Wiki / Base 链接</span><div className="data-input-with-icon"><Link2 size={14} /><input value={baseSource.url} onChange={(event) => setBaseSource({ url: event.target.value, tableId: "", viewId: "" })} placeholder="粘贴飞书多维表格链接" /></div></label>
+          <label><span>看板名称</span><input value={activeDashboard.name} onChange={(event) => updateActiveDashboard({ name: event.target.value })} placeholder="例如：调拨时效" /></label>
+          <label><span>Wiki / Base 链接</span><div className="data-input-with-icon"><Link2 size={14} /><input value={baseSource.url} onChange={(event) => setBaseSource({ url: event.target.value, tableId: "", tableName: "", viewId: "" })} placeholder="粘贴飞书多维表格链接" /></div></label>
           <button className="data-secondary-button" type="button" onClick={loadBaseTables} disabled={!connection.configured || loading === "base-tables"}>
             {loading === "base-tables" ? <LoaderCircle className="spin" size={15} /> : <CloudDownload size={15} />}
             检查权限并读取数据表
           </button>
-          <label><span>数据表</span><select value={baseSource.tableId} onChange={(event) => setBaseSource((current) => ({ ...current, tableId: event.target.value }))} disabled={!baseTables.length}>
+          <label><span>数据表</span><select value={baseSource.tableId} onChange={(event) => {
+            const tableId = event.target.value;
+            setBaseSource((current) => ({ ...current, tableId, tableName: baseTables.find((table) => table.table_id === tableId)?.name || "" }));
+          }} disabled={!baseTables.length && !baseSource.tableId}>
             <option value="">{baseTables.length ? "选择数据表" : "连接后显示"}</option>
+            {!baseTables.length && baseSource.tableId && <option value={baseSource.tableId}>{baseSource.tableName || "已保存的数据表"}</option>}
             {baseTables.map((table) => <option key={table.table_id} value={table.table_id}>{table.name}</option>)}
           </select></label>
-          <button className="data-primary-button compact" type="button" onClick={syncBase} disabled={!connection.configured || !baseSource.tableId || loading === "sync"}>
-            {loading === "sync" ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}同步到控制塔
+          <div className="data-sync-schedule">
+            <label><input type="checkbox" checked={activeDashboard.autoSync} onChange={(event) => updateActiveDashboard({ autoSync: event.target.checked })} /><span>自动同步</span></label>
+            <select value={activeDashboard.intervalMinutes} onChange={(event) => updateActiveDashboard({ intervalMinutes: Number(event.target.value) })} disabled={!activeDashboard.autoSync} aria-label="自动同步频率">
+              <option value={15}>每 15 分钟</option><option value={30}>每 30 分钟</option><option value={60}>每小时</option><option value={180}>每 3 小时</option><option value={360}>每 6 小时</option>
+            </select>
+          </div>
+          <small className="data-sync-note">应用打开时自动全量校验 · 本地快照可即时查看</small>
+          <button className="data-primary-button compact" type="button" onClick={() => syncBase(false)} disabled={!connection.configured || !baseSource.tableId || loading === "sync"}>
+            {loading === "sync" ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}立即同步
           </button>
         </section>}
 
@@ -509,12 +695,12 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
         <header className="data-page-header">
           <div>
             <span className="data-eyebrow">LOGISTICS INTELLIGENCE</span>
-            <h1>{towerReport ? "调拨时效控制塔" : (report?.sourceName || "物流数据分析")}</h1>
+            <h1>{towerReport ? activeDashboard.name || "调拨数据看板" : (report?.sourceName || "物流数据分析")}</h1>
             <p>{towerReport ? `${towerReport.sourceName} · 箱维度数据 · 日期筛选、异常和物流商绩效联动` : (report ? report.summary : "选择调拨时效 Excel，或从飞书多维表格同步业务数据。")}</p>
           </div>
           <div className="data-header-actions">
             {lastSync && <span className="data-last-sync"><CheckCircle2 size={14} />{new Date(lastSync).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 已更新</span>}
-            <button className="data-primary-button" type="button" onClick={() => activeSource === "local" && localFile ? loadWorkbook(localFile) : activeSource === "base" ? syncBase() : sync()} disabled={Boolean(loading) || (activeSource === "local" ? !localFile : activeSource === "base" ? !baseSource.tableId : !connection.configured || !source.sheetId)}>
+            <button className="data-primary-button" type="button" onClick={() => activeSource === "local" && localFile ? loadWorkbook(localFile) : activeSource === "base" ? syncBase(false) : sync()} disabled={Boolean(loading) || (activeSource === "local" ? !localFile : activeSource === "base" ? !baseSource.tableId : !connection.configured || !source.sheetId)}>
               {loading === "sync" || loading === "analyze" || loading === "workbook" ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}{activeSource === "local" ? "重新读取" : "立即同步"}
             </button>
           </div>
@@ -526,7 +712,7 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
           <div className="data-empty-state">
             <span className="data-empty-icon"><BarChart3 size={28} /></span>
             <h2>载入调拨时效数据</h2>
-            <p>先使用本地 Excel 查看控制塔，之后可以无缝切换到飞书多维表格。</p>
+            <p>先使用本地 Excel 查看看板，之后可以无缝切换到飞书多维表格。</p>
             <button className="data-primary-button" type="button" onClick={() => fileInputRef.current?.click()}><Upload size={15} />选择 Excel</button>
           </div>
         ) : towerReport ? (

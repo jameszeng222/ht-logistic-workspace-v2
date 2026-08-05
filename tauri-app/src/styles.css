@@ -3303,9 +3303,15 @@ body {
   background: #dff0eb;
   color: #087d6d;
 }
-.data-source-heading > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.data-source-heading > div { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
 .data-source-heading strong { color: #1f2925; font-size: 16px; font-weight: 720; }
 .data-source-heading small { overflow: hidden; color: #8a948f; font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.data-source-heading > button,
+.data-dashboard-picker > button { display: grid; width: 28px; height: 28px; flex: 0 0 28px; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #68756f; cursor: pointer; }
+.data-source-heading > button:hover,
+.data-dashboard-picker > button:hover { background: #e7eeeb; color: #087d6d; }
+.data-dashboard-picker { display: flex; margin: -5px 0 12px; align-items: center; gap: 5px; }
+.data-dashboard-picker select { width: 100%; min-width: 0; height: 32px; padding: 0 8px; border: 0; border-radius: 6px; outline: none; background: #edf2f0; color: #36423c; font: inherit; font-size: 10.5px; font-weight: 650; }
 
 .data-local-source {
   display: flex; min-width: 0; padding: 10px; align-items: center; justify-content: space-between; gap: 8px;
@@ -3371,6 +3377,11 @@ body {
 .data-sidebar-toggle svg { transition: transform .16s ease; }
 .data-sidebar-toggle svg.open { transform: rotate(180deg); }
 .data-base-source { padding: 10px; border-radius: 7px; background: #eef2f0; }
+.data-sync-schedule { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; }
+.data-source-form .data-sync-schedule > label { display: flex; flex: 0 0 auto; align-items: center; flex-direction: row; gap: 6px; color: #56635d; font-size: 10px; cursor: pointer; }
+.data-sync-schedule input { width: 14px; height: 14px; margin: 0; accent-color: #0b806f; }
+.data-source-form .data-sync-schedule select { width: auto; height: 30px; flex: 1; padding: 0 7px; font-size: 9.5px; }
+.data-sync-note { color: #89948f; font-size: 8.5px; line-height: 1.45; }
 .data-input-with-icon { position: relative; }
 .data-input-with-icon svg { position: absolute; top: 10px; left: 9px; color: #8b9691; pointer-events: none; }
 .data-input-with-icon input { padding-left: 30px; }
