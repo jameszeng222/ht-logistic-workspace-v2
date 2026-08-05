@@ -60,6 +60,25 @@ class TransferControlTowerTests(unittest.TestCase):
         self.assertEqual(result["records"][0]["category"], "假发")
         self.assertTrue(result["records"][0]["ontime"])
 
+    def test_handles_excel_serial_formula_dates_and_invalid_legacy_dates(self):
+        values = [
+            ["调拨单号", "箱号（赫特）", "物流商", "提货时间", "物流签收时间", "上架时间", "预计签收时间", "预计上架时间", "是否异常", "物流跟踪号"],
+            ["DB260708000026", "P1-B24", "德速", 1783555200000, 1784764800000, None, "46227", "46230", "否", "TRACK-24"],
+            ["DB260708000026", "P1-B25", "德速", 1783555200000, "1970-01-01 08:00:46", None, "46227", "46230", "optOR8UY5K", "TRACK-25"],
+        ]
+
+        result = parse_values(values, "调拨时效表（箱维度）", now=datetime(2026, 8, 5))
+
+        first, second = result["records"]
+        self.assertEqual(first["expectedReceiptDate"], "2026-07-24")
+        self.assertEqual(first["expectedShelfDate"], "2026-07-27")
+        self.assertTrue(first["overdueUnshelved"])
+        self.assertEqual(first["overdueDays"], 9)
+        self.assertIsNone(second["receiptDate"])
+        self.assertTrue(second["overdueUnreceived"])
+        self.assertEqual(second["overdueDays"], 12)
+        self.assertFalse(second["anomaly"])
+
 
 if __name__ == "__main__":
     unittest.main()

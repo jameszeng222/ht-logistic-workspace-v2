@@ -150,6 +150,27 @@ fn feishu_api_error(payload: &serde_json::Value) -> Option<String> {
     Some(format!("飞书接口错误 {code}：{msg}。{action}"))
 }
 
+fn resolve_feishu_option_value(
+    value: serde_json::Value,
+    options: &HashMap<String, String>,
+) -> serde_json::Value {
+    match value {
+        serde_json::Value::String(value) => serde_json::Value::String(
+            options.get(&value).cloned().unwrap_or(value),
+        ),
+        serde_json::Value::Array(values) => serde_json::Value::Array(
+            values.into_iter().map(|value| resolve_feishu_option_value(value, options)).collect(),
+        ),
+        serde_json::Value::Object(mut value) => {
+            for item in value.values_mut() {
+                *item = resolve_feishu_option_value(item.take(), options);
+            }
+            serde_json::Value::Object(value)
+        }
+        value => value,
+    }
+}
+
 async fn resolve_feishu_base_reference(
     client: &reqwest::Client,
     access_token: &str,
@@ -367,6 +388,7 @@ async fn feishu_fetch_base(
     let reference = resolve_feishu_base_reference(&client, &access_token, &base_url).await?;
 
     let mut available_fields = Vec::new();
+    let mut field_options: HashMap<String, HashMap<String, String>> = HashMap::new();
     let mut field_page_token: Option<String> = None;
     loop {
         let mut url = reqwest::Url::parse(&format!(
@@ -382,7 +404,23 @@ async fn feishu_fetch_base(
             .map_err(|e| format!("解析多维表格字段失败：{e}"))?;
         if let Some(error) = feishu_api_error(&payload) { return Err(error); }
         if let Some(items) = payload.pointer("/data/items").and_then(|value| value.as_array()) {
-            available_fields.extend(items.iter().filter_map(|item| item.get("field_name").and_then(|value| value.as_str()).map(str::to_string)));
+            for item in items {
+                let Some(field_name) = item.get("field_name").and_then(|value| value.as_str()) else { continue; };
+                available_fields.push(field_name.to_string());
+                let options: HashMap<String, String> = item.pointer("/property/options")
+                    .or_else(|| item.pointer("/property/type/ui_property/options"))
+                    .and_then(|value| value.as_array())
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|option| Some((
+                        option.get("id")?.as_str()?.to_string(),
+                        option.get("name")?.as_str()?.to_string(),
+                    )))
+                    .collect();
+                if !options.is_empty() {
+                    field_options.insert(field_name.to_string(), options);
+                }
+            }
         }
         let has_more = payload.pointer("/data/has_more").and_then(|value| value.as_bool()).unwrap_or(false);
         field_page_token = payload.pointer("/data/page_token").and_then(|value| value.as_str()).map(str::to_string);
@@ -419,7 +457,10 @@ async fn feishu_fetch_base(
             for item in items {
                 let record_fields = item.get("fields").and_then(|value| value.as_object());
                 rows.push(fields.iter().map(|field| {
-                    record_fields.and_then(|values| values.get(field)).cloned().unwrap_or(serde_json::Value::Null)
+                    let value = record_fields.and_then(|values| values.get(field)).cloned().unwrap_or(serde_json::Value::Null);
+                    field_options.get(field)
+                        .map(|options| resolve_feishu_option_value(value.clone(), options))
+                        .unwrap_or(value)
                 }).collect());
             }
         }
@@ -2465,7 +2506,8 @@ async fn path_exists(path: String) -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_models_config, parse_feishu_base_reference, parse_feishu_spreadsheet_token, FeishuBaseReference};
+    use super::{normalize_models_config, parse_feishu_base_reference, parse_feishu_spreadsheet_token, resolve_feishu_option_value, FeishuBaseReference};
+    use std::collections::HashMap;
 
     #[test]
     fn model_config_normalization_adds_safe_cost_defaults() {
@@ -2508,6 +2550,17 @@ mod tests {
             parse_feishu_base_reference("https://example.feishu.cn/base/baseToken").unwrap().token,
             "baseToken"
         );
+    }
+
+    #[test]
+    fn resolves_feishu_formula_option_ids() {
+        let options = HashMap::from([
+            ("optWJQMxE6".to_string(), "是".to_string()),
+            ("optOR8UY5K".to_string(), "否".to_string()),
+        ]);
+        let value = serde_json::json!(["optOR8UY5K"]);
+
+        assert_eq!(resolve_feishu_option_value(value, &options), serde_json::json!(["否"]));
     }
 }
 

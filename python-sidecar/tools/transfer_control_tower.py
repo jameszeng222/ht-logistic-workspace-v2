@@ -57,20 +57,38 @@ def _datetime(value: Any) -> datetime | None:
     value = _clean(value)
     if value is None:
         return None
+    parsed: datetime | None = None
     if isinstance(value, datetime):
-        return value
-    if isinstance(value, date):
-        return datetime(value.year, value.month, value.day)
-    if isinstance(value, (int, float)):
-        # Feishu Base dates are commonly milliseconds since Unix epoch.
-        if value > 10_000_000_000:
-            return datetime.fromtimestamp(value / 1000)
-        if value > 1_000_000_000:
-            return datetime.fromtimestamp(value)
-    parsed = pd.to_datetime(value, errors="coerce")
-    if pd.isna(parsed):
+        parsed = value
+    elif isinstance(value, date):
+        parsed = datetime(value.year, value.month, value.day)
+    else:
+        numeric = None
+        if isinstance(value, (int, float)):
+            numeric = float(value)
+        elif isinstance(value, str):
+            try:
+                numeric = float(value)
+            except ValueError:
+                pass
+
+        if numeric is not None:
+            # Feishu date fields use Unix timestamps, while date formulas can
+            # return Excel serial days such as 46230 instead of a timestamp.
+            if numeric > 10_000_000_000:
+                parsed = datetime.fromtimestamp(numeric / 1000)
+            elif numeric > 1_000_000_000:
+                parsed = datetime.fromtimestamp(numeric)
+            elif 20_000 <= numeric <= 80_000:
+                parsed = pd.to_datetime(numeric, unit="D", origin="1899-12-30").to_pydatetime()
+
+    if parsed is None:
+        converted = pd.to_datetime(value, errors="coerce")
+        if not pd.isna(converted):
+            parsed = converted.to_pydatetime()
+    if parsed is None or not 2000 <= parsed.year <= 2100:
         return None
-    return parsed.to_pydatetime()
+    return parsed
 
 
 def _iso_day(value: Any) -> str | None:
@@ -90,6 +108,8 @@ def _normalize_team(value: Any) -> str:
 
 def _is_exception(value: Any) -> bool:
     text = _text(value, "")
+    if text.startswith("opt"):
+        return False
     return bool(text and text not in {"否", "无异常", "未填写", "0", "False", "false"})
 
 
