@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { TransferControlTower, type TransferControlTowerReport } from "./TransferControlTower";
+import type { TransferControlTowerReport } from "./TransferControlTower";
 import { deleteDashboardSnapshot, loadDashboardSnapshot, saveDashboardSnapshot } from "./dashboardStorage";
+import {
+  ACTIVE_DASHBOARD_KEY,
+  BASE_SOURCE_KEY,
+  DASHBOARDS_KEY,
+  activeDashboardId as getActiveDashboardId,
+  createDashboardId,
+  loadBaseSourceConfig,
+  loadDashboardConfigs,
+  type BaseSourceConfig,
+  type TransferDashboardConfig,
+} from "./transferDashboardConfig";
 import {
   AlertTriangle,
   BarChart3,
@@ -40,22 +51,6 @@ interface FeishuSheet {
 interface FeishuBaseTable {
   table_id: string;
   name: string;
-}
-
-interface BaseSourceConfig {
-  url: string;
-  tableId: string;
-  tableName: string;
-  viewId: string;
-}
-
-interface TransferDashboardConfig {
-  id: string;
-  name: string;
-  source: BaseSourceConfig;
-  autoSync: boolean;
-  intervalMinutes: number;
-  lastSync: number | null;
 }
 
 interface SourceConfig {
@@ -118,12 +113,10 @@ interface LogisticsReport {
 
 interface LogisticsDataPanelProps {
   onSendToAssistant: (message: string) => void;
+  onOpenDashboard: () => void;
 }
 
 const SOURCE_KEY = "ht-feishu-logistics-source";
-const BASE_SOURCE_KEY = "ht-feishu-logistics-base-source";
-const DASHBOARDS_KEY = "ht-transfer-dashboards-v1";
-const ACTIVE_DASHBOARD_KEY = "ht-transfer-active-dashboard-v1";
 const EMPTY_MAPPING: FieldMapping = { customer: "", status: "", amount: "", date: "", tracking: "", route: "" };
 
 const MAPPING_FIELDS: Array<{ key: keyof FieldMapping; label: string; hint: string }> = [
@@ -150,56 +143,6 @@ function loadSource(): SourceConfig {
   return { name: "", url: "", sheetId: "", range: "" };
 }
 
-function loadBaseSource(): BaseSourceConfig {
-  try {
-    const stored = JSON.parse(localStorage.getItem(BASE_SOURCE_KEY) || "null");
-    if (stored && typeof stored.url === "string") {
-      return {
-        url: stored.url,
-        tableId: typeof stored.tableId === "string" ? stored.tableId : "",
-        tableName: typeof stored.tableName === "string" ? stored.tableName : "",
-        viewId: typeof stored.viewId === "string" ? stored.viewId : "",
-      };
-    }
-  } catch { /* ignore invalid local preferences */ }
-  return { url: "", tableId: "", tableName: "", viewId: "" };
-}
-
-function dashboardId(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `dashboard-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function loadDashboards(): TransferDashboardConfig[] {
-  try {
-    const stored = JSON.parse(localStorage.getItem(DASHBOARDS_KEY) || "null");
-    if (Array.isArray(stored) && stored.length) {
-      return stored.map((item, index) => ({
-        id: typeof item.id === "string" ? item.id : dashboardId(),
-        name: typeof item.name === "string" && item.name.trim() ? item.name : `调拨数据看板 ${index + 1}`,
-        source: {
-          url: typeof item.source?.url === "string" ? item.source.url : "",
-          tableId: typeof item.source?.tableId === "string" ? item.source.tableId : "",
-          tableName: typeof item.source?.tableName === "string" ? item.source.tableName : "",
-          viewId: typeof item.source?.viewId === "string" ? item.source.viewId : "",
-        },
-        autoSync: item.autoSync !== false,
-        intervalMinutes: [15, 30, 60, 180, 360].includes(Number(item.intervalMinutes)) ? Number(item.intervalMinutes) : 60,
-        lastSync: typeof item.lastSync === "number" ? item.lastSync : null,
-      }));
-    }
-  } catch { /* migrate to a default dashboard */ }
-  return [{
-    id: dashboardId(),
-    name: "调拨数据看板",
-    source: loadBaseSource(),
-    autoSync: true,
-    intervalMinutes: 60,
-    lastSync: null,
-  }];
-}
-
 function sheetId(sheet: FeishuSheet): string {
   return sheet.sheet_id || sheet.sheetId || "";
 }
@@ -224,11 +167,10 @@ function kindLabel(kind: string): string {
   return "文本";
 }
 
-export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProps) {
-  const [dashboards, setDashboards] = useState<TransferDashboardConfig[]>(loadDashboards);
+export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard }: LogisticsDataPanelProps) {
+  const [dashboards, setDashboards] = useState<TransferDashboardConfig[]>(loadDashboardConfigs);
   const [activeDashboardId, setActiveDashboardId] = useState(() => {
-    const stored = localStorage.getItem(ACTIVE_DASHBOARD_KEY);
-    return dashboards.some((dashboard) => dashboard.id === stored) ? stored as string : dashboards[0].id;
+    return getActiveDashboardId(dashboards);
   });
   const activeDashboard = dashboards.find((dashboard) => dashboard.id === activeDashboardId) || dashboards[0];
   const [connection, setConnection] = useState<FeishuConnection>({ configured: false, appId: null });
@@ -324,7 +266,7 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
 
   const createDashboard = useCallback(() => {
     const next: TransferDashboardConfig = {
-      id: dashboardId(),
+      id: createDashboardId(),
       name: `调拨数据看板 ${dashboards.length + 1}`,
       source: { url: "", tableId: "", tableName: "", viewId: "" },
       autoSync: true,
@@ -355,6 +297,7 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
     setDashboards((current) => current.map((dashboard) => (
       dashboard.id === targetDashboardId ? { ...dashboard, lastSync: savedAt } : dashboard
     )));
+    window.dispatchEvent(new CustomEvent("transfer-dashboard-updated", { detail: { dashboardId: targetDashboardId } }));
   }, []);
 
   const analyze = useCallback(async (values: unknown[][], nextMapping: FieldMapping, sourceName: string) => {
@@ -486,7 +429,10 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
       if (!background && isActive) setError("请先读取并选择多维表格中的数据表");
       return;
     }
-    if (syncingRef.current) return;
+    if (syncingRef.current) {
+      if (!background && isActive) setError("已有同步任务正在运行，请稍候再试");
+      return;
+    }
     syncingRef.current = true;
     if (!background && isActive) setLoading("sync");
     if (isActive) setError(null);
@@ -498,6 +444,7 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
         tableName: sourceConfig.tableName || dashboard.name || "飞书多维表格",
       });
       const values = Array.isArray(result.values) ? result.values : [];
+      if (values.length < 2) throw new Error("数据表中没有可分析的记录，请检查所选数据表或视图权限");
       const baseUrl = await sidecarUrl();
       const response = await fetch(`${baseUrl}/api/logistics-data/control-tower/values`, {
         method: "POST",
@@ -524,7 +471,10 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
     }
   }, [persistTowerReport, sidecarUrl]);
 
-  const syncBase = useCallback((background = false) => syncDashboard(activeDashboard, background), [activeDashboard, syncDashboard]);
+  const syncBase = useCallback(
+    (background = false) => syncDashboard({ ...activeDashboard, source: baseSource }, background),
+    [activeDashboard, baseSource, syncDashboard],
+  );
 
   useEffect(() => {
     if (!connection.configured) return;
@@ -595,7 +545,7 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
       <aside className="data-source-sidebar" aria-label="物流数据源">
         <header className="data-source-heading">
           <span><Database size={18} /></span>
-          <div><strong>物流数据</strong><small>调拨数据看板</small></div>
+          <div><strong>数据配置</strong><small>管理看板与同步来源</small></div>
           <button type="button" onClick={createDashboard} title="新建看板"><Plus size={15} /></button>
         </header>
 
@@ -694,103 +644,46 @@ export function LogisticsDataPanel({ onSendToAssistant }: LogisticsDataPanelProp
       <section className="logistics-data-page">
         <header className="data-page-header">
           <div>
-            <span className="data-eyebrow">LOGISTICS INTELLIGENCE</span>
-            <h1>{towerReport ? activeDashboard.name || "调拨数据看板" : (report?.sourceName || "物流数据分析")}</h1>
-            <p>{towerReport ? `${towerReport.sourceName} · 箱维度数据 · 日期筛选、异常和物流商绩效联动` : (report ? report.summary : "选择调拨时效 Excel，或从飞书多维表格同步业务数据。")}</p>
+            <span className="data-eyebrow">DATA SETTINGS</span>
+            <h1>数据配置</h1>
+            <p>在这里管理飞书连接、数据表、同步频率和多个业务看板。</p>
           </div>
           <div className="data-header-actions">
             {lastSync && <span className="data-last-sync"><CheckCircle2 size={14} />{new Date(lastSync).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 已更新</span>}
-            <button className="data-primary-button" type="button" onClick={() => activeSource === "local" && localFile ? loadWorkbook(localFile) : activeSource === "base" ? syncBase(false) : sync()} disabled={Boolean(loading) || (activeSource === "local" ? !localFile : activeSource === "base" ? !baseSource.tableId : !connection.configured || !source.sheetId)}>
-              {loading === "sync" || loading === "analyze" || loading === "workbook" ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}{activeSource === "local" ? "重新读取" : "立即同步"}
-            </button>
+            <button className="data-secondary-button" type="button" onClick={onOpenDashboard}><BarChart3 size={15} />打开调拨看板</button>
           </div>
         </header>
 
         {error && <div className="data-error"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)}>×</button></div>}
 
-        {!report && !towerReport ? (
-          <div className="data-empty-state">
-            <span className="data-empty-icon"><BarChart3 size={28} /></span>
-            <h2>载入调拨时效数据</h2>
-            <p>先使用本地 Excel 查看看板，之后可以无缝切换到飞书多维表格。</p>
-            <button className="data-primary-button" type="button" onClick={() => fileInputRef.current?.click()}><Upload size={15} />选择 Excel</button>
-          </div>
-        ) : towerReport ? (
-          <TransferControlTower report={towerReport} onSendToAssistant={onSendToAssistant} />
-        ) : report ? (
-          <div className="data-report-scroll">
-            <section className="data-metrics" aria-label="核心指标">
-              {report.metrics.map((metric) => (
-                <article key={metric.key}><small>{metric.label}</small><strong>{metric.value}</strong><span>{metric.detail}</span></article>
-              ))}
-            </section>
-
-            <section className="data-mapping-section">
-              <header><div><strong>字段映射</strong><small>告诉系统每一列在物流业务中的含义</small></div><span>{mappedCount}/6 已识别</span></header>
-              <div className="data-mapping-grid">
-                {MAPPING_FIELDS.map((field) => (
-                  <label key={field.key}><span><strong>{field.label}</strong><small>{field.hint}</small></span><select value={mapping[field.key]} onChange={(event) => setMapping((current) => ({ ...current, [field.key]: event.target.value }))}>
-                    <option value="">不使用</option>
-                    {columns.map((column) => <option value={column} key={column}>{column}</option>)}
-                  </select></label>
-                ))}
-              </div>
-              <button className="data-text-button" type="button" onClick={applyMapping} disabled={!rawValues || loading === "analyze"}><RefreshCw size={14} />按当前映射重新分析</button>
-            </section>
-
-            <div className="data-insight-grid">
-              <section className="data-distribution-section">
-                <header><strong>主要分布</strong><small>按当前字段映射汇总</small></header>
-                {report.distributions.length === 0 ? <div className="data-section-empty">映射客户、状态或线路字段后显示分布</div> : report.distributions.map((group) => (
-                  <div className="data-distribution" key={group.field}>
-                    <strong>{group.field}</strong>
-                    {group.items.map((item) => (
-                      <div className="data-bar-row" key={item.label}>
-                        <span title={item.label}>{item.label}</span>
-                        <i><b style={{ width: `${Math.max(item.percent, 3)}%` }} /></i>
-                        <em>{item.count}</em>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </section>
-
-              <section className="data-anomaly-section">
-                <header><div><strong>异常与复核</strong><small>同步后自动检查数据质量</small></div><span>{report.anomalies.length}</span></header>
-                {report.anomalies.length === 0 ? (
-                  <div className="data-quality-ok"><CheckCircle2 size={20} /><span><strong>暂未发现明显异常</strong><small>字段完整性和格式检查已完成</small></span></div>
-                ) : (
-                  <div className="data-anomaly-list">
-                    {report.anomalies.map((item, index) => (
-                      <article className={item.severity} key={`${item.title}-${index}`}>
-                        <AlertTriangle size={16} /><span><strong>{item.title}</strong><small>{item.detail}</small></span><em>{item.count}</em>
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </section>
+        <div className="data-config-overview">
+          <section className="data-config-current">
+            <header>
+              <span><Database size={20} /></span>
+              <div><small>当前看板</small><h2>{activeDashboard.name || "调拨数据看板"}</h2><p>{baseSource.tableName || "尚未选择飞书数据表"}</p></div>
+            </header>
+            <div className="data-config-status-grid">
+              <article className={connection.configured ? "ready" : ""}><ShieldCheck size={17} /><span><strong>飞书连接</strong><small>{connection.configured ? "已授权" : "未配置"}</small></span></article>
+              <article className={baseSource.tableId ? "ready" : ""}><Link2 size={17} /><span><strong>数据来源</strong><small>{baseSource.tableId ? "已选择数据表" : "待选择"}</small></span></article>
+              <article className={towerReport ? "ready" : ""}><BarChart3 size={17} /><span><strong>固化结果</strong><small>{towerReport ? `${towerReport.rows.toLocaleString("zh-CN")} 箱` : "尚无快照"}</small></span></article>
+              <article className={activeDashboard.autoSync ? "ready" : ""}><RefreshCw size={17} /><span><strong>定时同步</strong><small>{activeDashboard.autoSync ? `每 ${activeDashboard.intervalMinutes} 分钟` : "未开启"}</small></span></article>
             </div>
+            <div className="data-config-actions">
+              <button className="data-primary-button" type="button" onClick={() => syncBase(false)} disabled={!connection.configured || !baseSource.tableId || loading === "sync"}>
+                {loading === "sync" ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}同步并更新看板
+              </button>
+              <button className="data-secondary-button" type="button" onClick={onOpenDashboard}><BarChart3 size={15} />查看固化结果</button>
+            </div>
+          </section>
 
-            <section className="data-columns-section">
-              <header><div><strong>字段质量</strong><small>{report.columnCount} 个字段 · {report.rows} 条记录</small></div><button className="data-ai-button" type="button" onClick={sendToAi}><Send size={15} />交给 AI 深入分析</button></header>
-              <div className="data-column-table">
-                <div className="data-column-row head"><span>字段</span><span>类型</span><span>缺失</span><span>唯一值</span><span>示例</span></div>
-                {report.columns.map((column) => (
-                  <div className="data-column-row" key={column.name}>
-                    <strong>{column.name}</strong><span>{kindLabel(column.kind)}</span><span className={column.missingPct >= 20 ? "warn" : ""}>{column.missingPct}%</span><span>{column.unique}</span><span title={column.sample.join(" / ")}>{column.sample.join(" / ") || "—"}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
+          <section className="data-config-help">
+            <strong>配置顺序</strong>
+            <ol><li>保存飞书应用凭据</li><li>粘贴多维表格链接并读取数据表</li><li>选择同步频率后执行首次同步</li></ol>
+            <p>首次同步成功后，调拨看板会保存本地快照。以后打开应用可直接查看，不必等待飞书重新拉取。</p>
+          </section>
+        </div>
 
-            <section className="data-sample-section">
-              <header><strong>数据预览</strong><small>仅显示前 {report.sampleRows.length} 行</small></header>
-              <div className="data-sample-scroll"><table><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{report.sampleRows.map((row, index) => <tr key={index}>{columns.map((column) => <td key={column}>{String(row[column] ?? "")}</td>)}</tr>)}</tbody></table></div>
-            </section>
-          </div>
-        ) : null}
-
-        <footer className="data-page-footer"><ShieldCheck size={13} />{activeSource === "local" ? "本地只读解析 · 源文件不会上传云端" : "飞书只读访问 · 凭据保存在 Windows 凭据库"}{activeSource !== "local" && <> · <button type="button" onClick={() => window.open("https://open.feishu.cn/app", "_blank")}><ExternalLink size={12} />飞书开放平台</button></>}</footer>
+        <footer className="data-page-footer"><ShieldCheck size={13} />飞书只读访问 · 凭据保存在 Windows 凭据库 · <button type="button" onClick={() => window.open("https://open.feishu.cn/app", "_blank")}><ExternalLink size={12} />飞书开放平台</button></footer>
       </section>
     </>
   );

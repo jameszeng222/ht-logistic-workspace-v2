@@ -3271,7 +3271,8 @@ body {
 /* ============================================================
    Logistics data: Feishu source + local analysis workspace
    ============================================================ */
-.data-view .workspace-main { display: none; }
+.data-view .workspace-main,
+.dashboard-view .workspace-main { display: none; }
 
 .data-source-sidebar {
   display: flex;
@@ -3606,6 +3607,75 @@ body {
 .data-page-footer { display: flex; min-height: 32px; padding: 0 28px; align-items: center; justify-content: flex-end; gap: 4px; background: #f7f9f8; color: #929b97; font-size: 8.5px; }
 .data-page-footer button { display: inline-flex; align-items: center; gap: 3px; border: 0; background: transparent; color: #6d7a74; font: inherit; cursor: pointer; }
 .data-page-footer button:hover { color: #087d6d; }
+
+/* Data configuration is deliberately separate from the frequently used dashboard. */
+.data-config-overview {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  padding: 24px 28px;
+  overflow: auto;
+  grid-template-columns: minmax(360px, 1.35fr) minmax(240px, .65fr);
+  align-content: start;
+  gap: 14px;
+  background: #eef2f0;
+}
+.data-config-current,
+.data-config-help { padding: 20px; border-radius: 8px; background: #fff; }
+.data-config-current > header { display: flex; align-items: center; gap: 12px; }
+.data-config-current > header > span { display: grid; width: 42px; height: 42px; flex: 0 0 42px; place-items: center; border-radius: 8px; background: #e2f1ec; color: #087d6d; }
+.data-config-current > header > div { min-width: 0; }
+.data-config-current > header small { color: #0b806f; font-size: 8.5px; font-weight: 720; }
+.data-config-current h2 { margin: 2px 0; color: #27332d; font-size: 18px; letter-spacing: 0; }
+.data-config-current p { margin: 0; overflow: hidden; color: #89938e; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.data-config-status-grid { display: grid; margin-top: 20px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.data-config-status-grid article { display: flex; min-width: 0; min-height: 64px; padding: 11px; align-items: center; gap: 9px; border-radius: 7px; background: #f3f6f4; color: #9aa39f; }
+.data-config-status-grid article.ready { color: #18816f; }
+.data-config-status-grid article > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.data-config-status-grid strong { color: #435049; font-size: 10.5px; }
+.data-config-status-grid small { overflow: hidden; color: #8d9792; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.data-config-actions { display: flex; margin-top: 18px; gap: 8px; }
+.data-config-help > strong { color: #34413b; font-size: 12px; }
+.data-config-help ol { margin: 14px 0 0; padding-left: 22px; color: #536059; font-size: 10px; line-height: 2.2; }
+.data-config-help p { margin: 12px 0 0; padding: 11px; border-radius: 7px; background: #f3f6f4; color: #76817c; font-size: 9.5px; line-height: 1.65; }
+
+/* Persisted transfer dashboard: one click from the global rail, no setup chrome. */
+.transfer-dashboard-page {
+  display: flex;
+  grid-column: 2 / -1;
+  grid-row: 1 / -1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  flex-direction: column;
+  border-radius: 8px 0 0 8px;
+  background: #eef2f0;
+}
+.transfer-dashboard-header { display: flex; min-height: 82px; padding: 14px 26px; align-items: center; justify-content: space-between; gap: 18px; background: #f7f9f8; }
+.transfer-dashboard-title { display: flex; min-width: 0; align-items: center; gap: 11px; }
+.transfer-dashboard-title > span { display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; border-radius: 8px; background: #dff0eb; color: #087d6d; }
+.transfer-dashboard-title > div { min-width: 0; }
+.transfer-dashboard-title small { display: block; color: #087d6d; font-size: 8px; font-weight: 760; }
+.transfer-dashboard-title h1 { margin: 2px 0; color: #202b26; font-size: 20px; letter-spacing: 0; }
+.transfer-dashboard-title p { margin: 0; overflow: hidden; color: #87918c; font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+.transfer-dashboard-actions { display: flex; min-width: 0; flex: 0 0 auto; align-items: center; gap: 7px; }
+.transfer-dashboard-actions > span { display: inline-flex; align-items: center; gap: 4px; color: #76827c; font-size: 9px; white-space: nowrap; }
+.transfer-dashboard-actions > span svg { color: #26966c; }
+.transfer-dashboard-actions select { max-width: 170px; height: 32px; padding: 0 8px; border: 0; border-radius: 6px; outline: none; background: #e9eeeb; color: #45524c; font: inherit; font-size: 9.5px; }
+.transfer-dashboard-actions button { display: grid; width: 32px; height: 32px; padding: 0; place-items: center; border: 0; border-radius: 6px; background: #e9eeeb; color: #53615a; cursor: pointer; }
+.transfer-dashboard-actions button:hover:not(:disabled) { background: #dfeee9; color: #087d6d; }
+.transfer-dashboard-actions button:disabled { opacity: .55; cursor: default; }
+.transfer-dashboard-empty { display: flex; width: min(520px, calc(100% - 48px)); margin: auto; align-items: center; flex-direction: column; color: #7f8a84; text-align: center; }
+.transfer-dashboard-empty > span { display: grid; width: 52px; height: 52px; margin-bottom: 13px; place-items: center; border-radius: 8px; background: #dff0eb; color: #087d6d; }
+.transfer-dashboard-empty strong { color: #34413b; font-size: 14px; }
+.transfer-dashboard-empty p { margin: 7px 0 17px; color: #87918c; font-size: 10px; line-height: 1.6; }
+.transfer-dashboard-empty button { display: inline-flex; height: 34px; padding: 0 11px; align-items: center; gap: 6px; border: 0; border-radius: 6px; background: #0b806f; color: #fff; font: inherit; font-size: 10px; cursor: pointer; }
+
+@media (max-width: 900px) {
+  .data-config-overview { grid-template-columns: 1fr; padding: 18px; }
+  .transfer-dashboard-header { padding-right: 16px; padding-left: 18px; }
+  .transfer-dashboard-actions > span { display: none; }
+}
 
 .spin { animation: data-spin .8s linear infinite; }
 @keyframes data-spin { to { transform: rotate(360deg); } }

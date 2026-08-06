@@ -22,6 +22,7 @@ import { ChartView, extractChartConfig } from "./Chart";
 import { ToolsPanel, type ToolsPanelHandle, type ToolDef } from "./ToolsPanel";
 import { FileBrowser } from "./FileBrowser";
 import { LogisticsDataPanel } from "./LogisticsDataPanel";
+import { TransferDashboardPanel } from "./TransferDashboardPanel";
 import { EmailMonitorPanel } from "./EmailMonitorPanel";
 import { checkUpdate, downloadAndInstallUpdate, type UpdateStatus } from "./updater";
 import type { ToolCall, AssistantMsg, Turn } from "./types";
@@ -234,7 +235,7 @@ export default function App() {
   const [currentModel, setCurrentModel] = useState<ModelInfo | null>(null);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showPermissionDropdown, setShowPermissionDropdown] = useState(false);
-  const [workspaceView, setWorkspaceView] = useState<"assistant" | "tool" | "data" | "email">("assistant");
+  const [workspaceView, setWorkspaceView] = useState<"assistant" | "tool" | "dashboard" | "data" | "email">("assistant");
   const [emailAttentionCount, setEmailAttentionCount] = useState(0);
   const [assistantSidebarView, setAssistantSidebarView] = useState<"quick" | "files">("quick");
   const [contextPanelTab, setContextPanelTab] = useState<"files" | "outputs">("files");
@@ -1754,12 +1755,20 @@ export default function App() {
               <span>工具</span>
             </button>
             <button
-              className={`mode-rail-item ${workspaceView === "data" ? "active" : ""}`}
-              onClick={() => setWorkspaceView("data")}
-              title="物流数据"
+              className={`mode-rail-item ${workspaceView === "dashboard" ? "active" : ""}`}
+              onClick={() => setWorkspaceView("dashboard")}
+              title="调拨看板"
             >
               <ChartNoAxesCombined size={19} />
-              <span>物流数据</span>
+              <span>调拨看板</span>
+            </button>
+            <button
+              className={`mode-rail-item ${workspaceView === "data" ? "active" : ""}`}
+              onClick={() => setWorkspaceView("data")}
+              title="数据配置"
+            >
+              <Sheet size={19} />
+              <span>数据配置</span>
             </button>
             <button
               className={`mode-rail-item ${workspaceView === "email" ? "active" : ""}`}
@@ -1966,6 +1975,17 @@ export default function App() {
 
         {workspaceView === "data" && (
           <LogisticsDataPanel
+            onOpenDashboard={() => setWorkspaceView("dashboard")}
+            onSendToAssistant={(message) => {
+              setWorkspaceView("assistant");
+              send(message);
+            }}
+          />
+        )}
+
+        {workspaceView === "dashboard" && (
+          <TransferDashboardPanel
+            onOpenConfig={() => setWorkspaceView("data")}
             onSendToAssistant={(message) => {
               setWorkspaceView("assistant");
               send(message);
