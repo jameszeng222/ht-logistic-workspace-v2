@@ -67,6 +67,13 @@ const TRANSFER_BASE_FIELDS: &[&str] = &[
     "异常事件描述（物流商填写）", "预计签收时间", "预计上架时间",
 ];
 
+const QUOTE_BASE_FIELDS: &[&str] = &[
+    "提货日期", "调拨单号", "发货地", "目的地", "运输类型", "物流渠道", "物流商",
+    "单价", "渠道计费重（确认计费重）", "运费（不含国内税点）", "报关费", "保险费",
+    "杂费", "关税", "补收+", "调减-", "总金额", "箱数（以此为准）", "件数（以此为准）",
+    "一级分类", "品名", "是否报关",
+];
+
 fn feishu_keyring_entry() -> Result<keyring::Entry, String> {
     keyring::Entry::new(FEISHU_KEYRING_SERVICE, FEISHU_KEYRING_USER)
         .map_err(|e| format!("无法访问 Windows 凭据库：{e}"))
@@ -377,6 +384,7 @@ async fn feishu_fetch_base(
     table_id: String,
     view_id: Option<String>,
     table_name: Option<String>,
+    data_kind: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let table_id = table_id.trim().to_string();
     if table_id.is_empty() {
@@ -426,9 +434,14 @@ async fn feishu_fetch_base(
         field_page_token = payload.pointer("/data/page_token").and_then(|value| value.as_str()).map(str::to_string);
         if !has_more || field_page_token.is_none() { break; }
     }
-    let fields: Vec<String> = TRANSFER_BASE_FIELDS.iter().filter(|name| available_fields.iter().any(|field| field == **name)).map(|name| (*name).to_string()).collect();
+    let expected_fields = if data_kind.as_deref() == Some("quote") {
+        QUOTE_BASE_FIELDS
+    } else {
+        TRANSFER_BASE_FIELDS
+    };
+    let fields: Vec<String> = expected_fields.iter().filter(|name| available_fields.iter().any(|field| field == **name)).map(|name| (*name).to_string()).collect();
     if fields.is_empty() {
-        return Err("选中的数据表没有识别到调拨时效字段".into());
+        return Err("选中的数据表没有识别到看板所需字段".into());
     }
 
     let mut rows: Vec<Vec<serde_json::Value>> = Vec::new();

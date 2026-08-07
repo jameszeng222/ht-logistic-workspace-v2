@@ -17,7 +17,7 @@ interface Props {
 }
 
 export function TransferDashboardPanel({ onOpenConfig, onSendToAssistant }: Props) {
-  const [dashboards, setDashboards] = useState<TransferDashboardConfig[]>(loadDashboardConfigs);
+  const [dashboards, setDashboards] = useState<TransferDashboardConfig[]>(() => loadDashboardConfigs().filter((dashboard) => dashboard.kind === "transfer"));
   const [activeId, setActiveId] = useState(() => getActiveDashboardId(dashboards));
   const [report, setReport] = useState<TransferControlTowerReport | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -31,10 +31,6 @@ export function TransferDashboardPanel({ onOpenConfig, onSendToAssistant }: Prop
     () => dashboards.find((dashboard) => dashboard.id === activeId) || dashboards[0],
     [activeId, dashboards],
   );
-
-  useEffect(() => {
-    saveDashboardConfigs(dashboards);
-  }, [dashboards]);
 
   const loadSnapshot = useCallback(async (dashboardId: string) => {
     setLoading(true);
@@ -59,10 +55,10 @@ export function TransferDashboardPanel({ onOpenConfig, onSendToAssistant }: Prop
       const dashboardId = (event as CustomEvent<{ dashboardId?: string }>).detail?.dashboardId;
       if (!dashboardId || dashboardId === activeId) loadSnapshot(activeId);
     };
-    window.addEventListener("transfer-dashboard-updated", onUpdated);
+    window.addEventListener("dashboard-updated", onUpdated);
     return () => {
       mountedRef.current = false;
-      window.removeEventListener("transfer-dashboard-updated", onUpdated);
+      window.removeEventListener("dashboard-updated", onUpdated);
     };
   }, [activeId, loadSnapshot]);
 
@@ -83,6 +79,7 @@ export function TransferDashboardPanel({ onOpenConfig, onSendToAssistant }: Prop
         tableId: activeDashboard.source.tableId,
         viewId: activeDashboard.source.viewId || null,
         tableName: activeDashboard.source.tableName || activeDashboard.name,
+        dataKind: "transfer",
       });
       const values = Array.isArray(result.values) ? result.values : [];
       if (values.length < 2) throw new Error("数据表中没有可分析的记录，请检查数据表或视图权限");
@@ -103,7 +100,11 @@ export function TransferDashboardPanel({ onOpenConfig, onSendToAssistant }: Prop
       const nextDashboards = dashboards.map((dashboard) => dashboard.id === activeDashboard.id
         ? { ...dashboard, lastSync: nextSavedAt }
         : dashboard);
-      saveDashboardConfigs(nextDashboards);
+      const allDashboards = loadDashboardConfigs().map((dashboard) => {
+        const updated = nextDashboards.find((candidate) => candidate.id === dashboard.id);
+        return updated || dashboard;
+      });
+      saveDashboardConfigs(allDashboards);
       if (!mountedRef.current) return;
       setDashboards(nextDashboards);
       setReport(nextReport);

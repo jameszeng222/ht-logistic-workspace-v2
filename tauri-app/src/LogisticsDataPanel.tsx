@@ -11,6 +11,7 @@ import {
   loadBaseSourceConfig,
   loadDashboardConfigs,
   type BaseSourceConfig,
+  type DashboardKind,
   type TransferDashboardConfig,
 } from "./transferDashboardConfig";
 import {
@@ -113,8 +114,10 @@ interface LogisticsReport {
 
 interface LogisticsDataPanelProps {
   onSendToAssistant: (message: string) => void;
-  onOpenDashboard: () => void;
+  onOpenDashboard: (kind: DashboardKind) => void;
 }
+
+interface StoredDashboardReport { rows: number; sourceName?: string }
 
 const SOURCE_KEY = "ht-feishu-logistics-source";
 const EMPTY_MAPPING: FieldMapping = { customer: "", status: "", amount: "", date: "", tracking: "", route: "" };
@@ -186,7 +189,7 @@ export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard }: Logis
   const [mapping, setMapping] = useState<FieldMapping>(EMPTY_MAPPING);
   const [rawValues, setRawValues] = useState<unknown[][] | null>(null);
   const [report, setReport] = useState<LogisticsReport | null>(null);
-  const [towerReport, setTowerReport] = useState<TransferControlTowerReport | null>(null);
+  const [towerReport, setTowerReport] = useState<StoredDashboardReport | null>(null);
   const [localFile, setLocalFile] = useState<File | null>(null);
   const [activeSource, setActiveSource] = useState<"local" | "base" | "sheet" | null>(null);
   const [lastSync, setLastSync] = useState<number | null>(activeDashboard.lastSync);
@@ -242,7 +245,7 @@ export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard }: Logis
     setLocalFile(null);
     setActiveSource(dashboard.source.tableId ? "base" : null);
     setError(null);
-    loadDashboardSnapshot<TransferControlTowerReport>(activeDashboardId)
+    loadDashboardSnapshot<StoredDashboardReport>(activeDashboardId)
       .then((snapshot) => {
         if (!snapshot || activeDashboardIdRef.current !== activeDashboardId) return;
         setTowerReport(snapshot.report);
@@ -268,6 +271,7 @@ export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard }: Logis
     const next: TransferDashboardConfig = {
       id: createDashboardId(),
       name: `调拨数据看板 ${dashboards.length + 1}`,
+      kind: "transfer",
       source: { url: "", tableId: "", tableName: "", viewId: "" },
       autoSync: true,
       intervalMinutes: 60,
@@ -288,7 +292,7 @@ export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard }: Logis
   }, [activeDashboardId, dashboards]);
 
   const persistTowerReport = useCallback(async (
-    nextReport: TransferControlTowerReport,
+    nextReport: StoredDashboardReport,
     sourceType: "base" | "local",
     savedAt: number,
     targetDashboardId: string,
@@ -297,7 +301,7 @@ export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard }: Logis
     setDashboards((current) => current.map((dashboard) => (
       dashboard.id === targetDashboardId ? { ...dashboard, lastSync: savedAt } : dashboard
     )));
-    window.dispatchEvent(new CustomEvent("transfer-dashboard-updated", { detail: { dashboardId: targetDashboardId } }));
+    window.dispatchEvent(new CustomEvent("dashboard-updated", { detail: { dashboardId: targetDashboardId } }));
   }, []);
 
   const analyze = useCallback(async (values: unknown[][], nextMapping: FieldMapping, sourceName: string) => {
@@ -360,9 +364,10 @@ export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard }: Logis
       const result = await invoke<{ tables: FeishuBaseTable[]; tableId?: string | null; viewId?: string | null }>("feishu_list_base_tables", { baseUrl: baseSource.url });
       const tables = Array.isArray(result.tables) ? result.tables : [];
       setBaseTables(tables);
+      const preferredNameByKind = activeDashboard.kind === "quote" ? "大货运费表" : "调拨时效表（箱维度）";
       const preferred = result.tableId && tables.some((table) => table.table_id === result.tableId)
         ? result.tableId
-        : tables.find((table) => table.name === "调拨时效表（箱维度）")?.table_id || tables[0]?.table_id || "";
+        : tables.find((table) => table.name === preferredNameByKind)?.table_id || tables[0]?.table_id || "";
       const preferredName = tables.find((table) => table.table_id === preferred)?.name || "";
       setBaseSource((current) => ({ ...current, tableId: preferred, tableName: preferredName, viewId: result.viewId || current.viewId }));
     } catch (reason) {
@@ -370,7 +375,7 @@ export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard }: Logis
     } finally {
       setLoading(null);
     }
-  }, [baseSource.url]);
+  }, [activeDashboard.kind, baseSource.url]);
 
   const loadSheets = useCallback(async () => {
     if (!source.url.trim()) {
@@ -442,18 +447,20 @@ export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard }: Logis
         tableId: sourceConfig.tableId,
         viewId: sourceConfig.viewId || null,
         tableName: sourceConfig.tableName || dashboard.name || "飞书多维表格",
+        dataKind: dashboard.kind,
       });
       const values = Array.isArray(result.values) ? result.values : [];
       if (values.length < 2) throw new Error("数据表中没有可分析的记录，请检查所选数据表或视图权限");
       const baseUrl = await sidecarUrl();
-      const response = await fetch(`${baseUrl}/api/logistics-data/control-tower/values`, {
+      const endpoint = dashboard.kind === "quote" ? "/api/logistics-data/quote/values" : "/api/logistics-data/control-tower/values";
+      const response = await fetch(`${baseUrl}${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ values, source_name: result.tableName || sourceConfig.tableName || dashboard.name || "飞书多维表格" }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || `分析服务返回 ${response.status}`);
-      const nextReport = payload as TransferControlTowerReport;
+      const nextReport = payload as StoredDashboardReport;
       const syncedAt = Date.now();
       await persistTowerReport(nextReport, "base", syncedAt, dashboard.id);
       if (activeDashboardIdRef.current === dashboard.id) {
@@ -553,10 +560,10 @@ export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard }: Logis
           <select value={activeDashboardId} onChange={(event) => setActiveDashboardId(event.target.value)} aria-label="切换数据看板">
             {dashboards.map((dashboard) => <option key={dashboard.id} value={dashboard.id}>{dashboard.name}</option>)}
           </select>
-          {dashboards.length > 1 && <button type="button" onClick={removeDashboard} title="删除当前看板"><Trash2 size={14} /></button>}
-        </div>
+        {dashboards.length > 1 && activeDashboard.kind !== "quote" && <button type="button" onClick={removeDashboard} title="删除当前看板"><Trash2 size={14} /></button>}
+      </div>
 
-        <section className={`data-local-source ${towerReport ? "active" : ""}`}>
+        {activeDashboard.kind === "transfer" && <section className={`data-local-source ${towerReport ? "active" : ""}`}>
           <input ref={fileInputRef} type="file" accept=".xlsx,.xls" hidden onChange={(event) => {
             const file = event.target.files?.[0];
             if (file) loadWorkbook(file);
@@ -566,7 +573,7 @@ export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard }: Logis
           <button type="button" onClick={() => fileInputRef.current?.click()} disabled={loading === "workbook"}>
             {loading === "workbook" ? <LoaderCircle className="spin" size={14} /> : <Upload size={14} />}{towerReport ? "更换" : "选择文件"}
           </button>
-        </section>
+        </section>}
 
         <div className="data-sidebar-label">飞书数据源</div>
 
@@ -595,7 +602,7 @@ export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard }: Logis
           <span>多维表格</span><ChevronDown className={showBaseSource ? "open" : ""} size={14} />
         </button>
         {showBaseSource && <section className="data-source-form data-base-source">
-          <label><span>看板名称</span><input value={activeDashboard.name} onChange={(event) => updateActiveDashboard({ name: event.target.value })} placeholder="例如：调拨时效" /></label>
+          <label><span>看板名称</span><input value={activeDashboard.name} onChange={(event) => updateActiveDashboard({ name: event.target.value })} placeholder={activeDashboard.kind === "quote" ? "例如：物流报价" : "例如：调拨时效"} /></label>
           <label><span>Wiki / Base 链接</span><div className="data-input-with-icon"><Link2 size={14} /><input value={baseSource.url} onChange={(event) => setBaseSource({ url: event.target.value, tableId: "", tableName: "", viewId: "" })} placeholder="粘贴飞书多维表格链接" /></div></label>
           <button className="data-secondary-button" type="button" onClick={loadBaseTables} disabled={!connection.configured || loading === "base-tables"}>
             {loading === "base-tables" ? <LoaderCircle className="spin" size={15} /> : <CloudDownload size={15} />}
@@ -650,7 +657,7 @@ export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard }: Logis
           </div>
           <div className="data-header-actions">
             {lastSync && <span className="data-last-sync"><CheckCircle2 size={14} />{new Date(lastSync).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 已更新</span>}
-            <button className="data-secondary-button" type="button" onClick={onOpenDashboard}><BarChart3 size={15} />打开调拨看板</button>
+            <button className="data-secondary-button" type="button" onClick={() => onOpenDashboard(activeDashboard.kind)}><BarChart3 size={15} />打开{activeDashboard.kind === "quote" ? "报价" : "调拨"}看板</button>
           </div>
         </header>
 
@@ -665,21 +672,21 @@ export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard }: Logis
             <div className="data-config-status-grid">
               <article className={connection.configured ? "ready" : ""}><ShieldCheck size={17} /><span><strong>飞书连接</strong><small>{connection.configured ? "已授权" : "未配置"}</small></span></article>
               <article className={baseSource.tableId ? "ready" : ""}><Link2 size={17} /><span><strong>数据来源</strong><small>{baseSource.tableId ? "已选择数据表" : "待选择"}</small></span></article>
-              <article className={towerReport ? "ready" : ""}><BarChart3 size={17} /><span><strong>固化结果</strong><small>{towerReport ? `${towerReport.rows.toLocaleString("zh-CN")} 箱` : "尚无快照"}</small></span></article>
+              <article className={towerReport ? "ready" : ""}><BarChart3 size={17} /><span><strong>固化结果</strong><small>{towerReport ? `${towerReport.rows.toLocaleString("zh-CN")} 条` : "尚无快照"}</small></span></article>
               <article className={activeDashboard.autoSync ? "ready" : ""}><RefreshCw size={17} /><span><strong>定时同步</strong><small>{activeDashboard.autoSync ? `每 ${activeDashboard.intervalMinutes} 分钟` : "未开启"}</small></span></article>
             </div>
             <div className="data-config-actions">
               <button className="data-primary-button" type="button" onClick={() => syncBase(false)} disabled={!connection.configured || !baseSource.tableId || loading === "sync"}>
                 {loading === "sync" ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}同步并更新看板
               </button>
-              <button className="data-secondary-button" type="button" onClick={onOpenDashboard}><BarChart3 size={15} />查看固化结果</button>
+              <button className="data-secondary-button" type="button" onClick={() => onOpenDashboard(activeDashboard.kind)}><BarChart3 size={15} />查看固化结果</button>
             </div>
           </section>
 
           <section className="data-config-help">
             <strong>配置顺序</strong>
             <ol><li>保存飞书应用凭据</li><li>粘贴多维表格链接并读取数据表</li><li>选择同步频率后执行首次同步</li></ol>
-            <p>首次同步成功后，调拨看板会保存本地快照。以后打开应用可直接查看，不必等待飞书重新拉取。</p>
+            <p>首次同步成功后，看板会保存本地快照。以后打开应用可直接查看，不必等待飞书重新拉取。</p>
           </section>
         </div>
 

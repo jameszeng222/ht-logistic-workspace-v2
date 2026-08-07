@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-from tools import invoice_packing, customs_generator, customs_extractor, data_analysis, hs_code, logistics_data, email_monitor, transfer_control_tower
+from tools import invoice_packing, customs_generator, customs_extractor, data_analysis, hs_code, logistics_data, email_monitor, logistics_quote, transfer_control_tower
 
 
 app = FastAPI(title="HT Logistic Workspace — Tools")
@@ -148,6 +148,21 @@ async def build_logistics_control_tower_from_values(request: TransferControlTowe
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"读取飞书调拨数据失败：{e}")
+
+
+@app.post("/api/logistics-data/quote/values")
+async def build_logistics_quote_from_values(request: TransferControlTowerRequest):
+    """Build the logistics quote dashboard from Feishu Base values."""
+    try:
+        return await run_in_threadpool(
+            logistics_quote.parse_values,
+            request.values,
+            request.source_name,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取飞书报价数据失败：{e}")
 
 
 @app.post("/api/email-monitor/scan")

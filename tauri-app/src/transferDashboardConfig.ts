@@ -5,9 +5,12 @@ export interface BaseSourceConfig {
   viewId: string;
 }
 
+export type DashboardKind = "transfer" | "quote";
+
 export interface TransferDashboardConfig {
   id: string;
   name: string;
+  kind: DashboardKind;
   source: BaseSourceConfig;
   autoSync: boolean;
   intervalMinutes: number;
@@ -17,6 +20,38 @@ export interface TransferDashboardConfig {
 export const BASE_SOURCE_KEY = "ht-feishu-logistics-base-source";
 export const DASHBOARDS_KEY = "ht-transfer-dashboards-v1";
 export const ACTIVE_DASHBOARD_KEY = "ht-transfer-active-dashboard-v1";
+export const QUOTE_DASHBOARD_ID = "logistics-quote-dashboard";
+export const QUOTE_BASE_URL = "https://q1my9tkfihy.feishu.cn/wiki/ODF2wicfzi8cjtkfigLcGIBRn1f?from=from_copylink";
+export const QUOTE_TABLE_ID = "tblPweuGqJhRMceB";
+
+export function defaultTransferDashboard(): TransferDashboardConfig {
+  return {
+    id: createDashboardId(),
+    name: "调拨数据看板",
+    kind: "transfer",
+    source: loadBaseSourceConfig(),
+    autoSync: true,
+    intervalMinutes: 60,
+    lastSync: null,
+  };
+}
+
+export function defaultQuoteDashboard(): TransferDashboardConfig {
+  return {
+    id: QUOTE_DASHBOARD_ID,
+    name: "物流报价",
+    kind: "quote",
+    source: {
+      url: QUOTE_BASE_URL,
+      tableId: QUOTE_TABLE_ID,
+      tableName: "大货运费表",
+      viewId: "",
+    },
+    autoSync: true,
+    intervalMinutes: 60,
+    lastSync: null,
+  };
+}
 
 export function createDashboardId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -43,9 +78,10 @@ export function loadDashboardConfigs(): TransferDashboardConfig[] {
   try {
     const stored = JSON.parse(localStorage.getItem(DASHBOARDS_KEY) || "null");
     if (Array.isArray(stored) && stored.length) {
-      return stored.map((item, index) => ({
+      const dashboards = stored.map((item, index) => ({
         id: typeof item.id === "string" ? item.id : createDashboardId(),
         name: typeof item.name === "string" && item.name.trim() ? item.name : `调拨数据看板 ${index + 1}`,
+        kind: item.kind === "quote" ? "quote" as const : "transfer" as const,
         source: {
           url: typeof item.source?.url === "string" ? item.source.url : "",
           tableId: typeof item.source?.tableId === "string" ? item.source.tableId : "",
@@ -56,16 +92,16 @@ export function loadDashboardConfigs(): TransferDashboardConfig[] {
         intervalMinutes: [15, 30, 60, 180, 360].includes(Number(item.intervalMinutes)) ? Number(item.intervalMinutes) : 60,
         lastSync: typeof item.lastSync === "number" ? item.lastSync : null,
       }));
+      if (!dashboards.some((dashboard) => dashboard.kind === "quote")) {
+        dashboards.push(defaultQuoteDashboard());
+      }
+      if (!dashboards.some((dashboard) => dashboard.kind === "transfer")) {
+        dashboards.unshift(defaultTransferDashboard());
+      }
+      return dashboards;
     }
   } catch { /* migrate to one default dashboard */ }
-  return [{
-    id: createDashboardId(),
-    name: "调拨数据看板",
-    source: loadBaseSourceConfig(),
-    autoSync: true,
-    intervalMinutes: 60,
-    lastSync: null,
-  }];
+  return [defaultTransferDashboard(), defaultQuoteDashboard()];
 }
 
 export function activeDashboardId(dashboards: TransferDashboardConfig[]): string {

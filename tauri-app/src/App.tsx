@@ -22,6 +22,7 @@ import { ChartView, extractChartConfig } from "./Chart";
 import { ToolsPanel, type ToolsPanelHandle, type ToolDef } from "./ToolsPanel";
 import { FileBrowser } from "./FileBrowser";
 import { LogisticsDataPanel } from "./LogisticsDataPanel";
+import { LogisticsQuotePanel } from "./LogisticsQuotePanel";
 import { TransferDashboardPanel } from "./TransferDashboardPanel";
 import { EmailMonitorPanel } from "./EmailMonitorPanel";
 import { checkUpdate, downloadAndInstallUpdate, type UpdateStatus } from "./updater";
@@ -31,6 +32,7 @@ import {
   Bot,
   Box,
   ChartNoAxesCombined,
+  CircleDollarSign,
   ChevronDown,
   ChevronRight,
   ClipboardList,
@@ -235,7 +237,7 @@ export default function App() {
   const [currentModel, setCurrentModel] = useState<ModelInfo | null>(null);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showPermissionDropdown, setShowPermissionDropdown] = useState(false);
-  const [workspaceView, setWorkspaceView] = useState<"assistant" | "tool" | "dashboard" | "data" | "email">("assistant");
+  const [workspaceView, setWorkspaceView] = useState<"assistant" | "tool" | "dashboard" | "quote" | "data" | "email">("assistant");
   const [emailAttentionCount, setEmailAttentionCount] = useState(0);
   const [assistantSidebarView, setAssistantSidebarView] = useState<"quick" | "files">("quick");
   const [contextPanelTab, setContextPanelTab] = useState<"files" | "outputs">("files");
@@ -1763,6 +1765,14 @@ export default function App() {
               <span>调拨看板</span>
             </button>
             <button
+              className={`mode-rail-item ${workspaceView === "quote" ? "active" : ""}`}
+              onClick={() => setWorkspaceView("quote")}
+              title="物流报价"
+            >
+              <CircleDollarSign size={19} />
+              <span>物流报价</span>
+            </button>
+            <button
               className={`mode-rail-item ${workspaceView === "data" ? "active" : ""}`}
               onClick={() => setWorkspaceView("data")}
               title="数据配置"
@@ -1975,7 +1985,7 @@ export default function App() {
 
         {workspaceView === "data" && (
           <LogisticsDataPanel
-            onOpenDashboard={() => setWorkspaceView("dashboard")}
+            onOpenDashboard={(kind) => setWorkspaceView(kind === "quote" ? "quote" : "dashboard")}
             onSendToAssistant={(message) => {
               setWorkspaceView("assistant");
               send(message);
@@ -1985,6 +1995,16 @@ export default function App() {
 
         {workspaceView === "dashboard" && (
           <TransferDashboardPanel
+            onOpenConfig={() => setWorkspaceView("data")}
+            onSendToAssistant={(message) => {
+              setWorkspaceView("assistant");
+              send(message);
+            }}
+          />
+        )}
+
+        {workspaceView === "quote" && (
+          <LogisticsQuotePanel
             onOpenConfig={() => setWorkspaceView("data")}
             onSendToAssistant={(message) => {
               setWorkspaceView("assistant");
