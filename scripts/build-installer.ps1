@@ -332,7 +332,8 @@ Get-ChildItem $sidecarDir -Recurse -Directory -Filter "__pycache__" -ErrorAction
 
 Push-Location $tauriDir
 try {
-    npm install --silent
+    # Use the committed lock file without rewriting it during a build.
+    npm ci --silent
 
     # 3a-pre. Clear stale NSIS bundle artifacts before building.
     # Tauri's incremental build reuses any existing *-setup.exe in the bundle/nsis

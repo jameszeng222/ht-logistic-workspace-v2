@@ -71,9 +71,21 @@ PROJECT_HANDOFF.md          给后续代码模型接手的详细上下文
 一键构建 Windows NSIS 安装包，新电脑装完即用，无需预装任何运行时。
 
 ```powershell
+# 日常本地构建（推荐）
+.\build.ps1
+
+# 只检查环境，不执行耗时构建
+.\build.ps1 -CheckOnly
+
+# 已单独跑过测试时
+.\build.ps1 -SkipTests
+
+# 构建并创建 GitHub Release
 # 前置：Rust + Node.js + Python + 签名密钥（C:\Users\HT\.tauri\ht-logistic.key）
 .\scripts\build-and-release.ps1
 ```
+
+本地安装包会统一复制到 `output\installer\`。`build.ps1` 不升级版本、不提交代码，也不上传 GitHub。
 
 构建流程：
 1. PyInstaller 把 Python sidecar 打成单文件 `ht-sidecar.exe`（含完整 Python 运行时）
