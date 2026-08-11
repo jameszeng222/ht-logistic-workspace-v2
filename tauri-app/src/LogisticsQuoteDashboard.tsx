@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, Bot, Boxes, CircleDollarSign, FileWarning, Scale, Truck } from "lucide-react";
+import { AlertTriangle, Bot, CircleDollarSign, FileWarning, Scale, Truck } from "lucide-react";
 
 export interface LogisticsQuoteRecord {
   pickupDate: string | null;
@@ -60,8 +60,9 @@ function amountLabel(value: number): string {
 }
 
 export function LogisticsQuoteDashboard({ report, onSendToAssistant }: Props) {
-  const [view, setView] = useState<View>("overview");
+  const [view, setView] = useState<View>("rates");
   const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [selectedRouteKey, setSelectedRouteKey] = useState("");
   const months = useMemo(() => [...new Set(report.records.map((record) => record.pickupDate?.slice(0, 7)).filter(Boolean) as string[])].sort().reverse(), [report.records]);
   const filtered = useMemo(() => report.records.filter((record) => {
     if (filters.month !== "全部" && record.pickupDate?.slice(0, 7) !== filters.month) return false;
@@ -103,12 +104,60 @@ export function LogisticsQuoteDashboard({ report, onSendToAssistant }: Props) {
     });
     return [...groups.values()].map((row) => ({
       ...row,
+      key: `${row.route}|${row.transport}`,
       providerCount: row.providers.size,
       minRate: row.rates.length ? Math.min(...row.rates) : 0,
       maxRate: row.rates.length ? Math.max(...row.rates) : 0,
       averageRate: row.rates.length ? row.rates.reduce((sum, value) => sum + value, 0) / row.rates.length : 0,
-    })).sort((a, b) => b.records - a.records);
+    })).sort((a, b) => b.providerCount - a.providerCount || b.records - a.records);
   }, [filtered]);
+
+  const selectedRoute = routeRows.find((row) => row.key === selectedRouteKey) || routeRows[0];
+  const providerComparisons = useMemo(() => {
+    if (!selectedRoute) return [];
+    const groups = new Map<string, {
+      provider: string;
+      records: number;
+      rates: number[];
+      channels: Set<string>;
+      latest: LogisticsQuoteRecord | null;
+      complexRates: number;
+    }>();
+    filtered.forEach((record) => {
+      const route = `${record.origin} → ${record.destination}`;
+      if (route !== selectedRoute.route || record.transport !== selectedRoute.transport) return;
+      const row = groups.get(record.provider) || {
+        provider: record.provider,
+        records: 0,
+        rates: [],
+        channels: new Set<string>(),
+        latest: null,
+        complexRates: 0,
+      };
+      row.records += 1;
+      if (record.channel && record.channel !== "未填写") row.channels.add(record.channel);
+      if (record.unitPrice !== null) row.rates.push(record.unitPrice);
+      if (record.hasComplexRate) row.complexRates += 1;
+      if (!row.latest || (record.pickupDate || "") >= (row.latest.pickupDate || "")) row.latest = record;
+      groups.set(record.provider, row);
+    });
+    return [...groups.values()].map((row) => ({
+      ...row,
+      channels: [...row.channels],
+      averageRate: row.rates.length ? row.rates.reduce((sum, value) => sum + value, 0) / row.rates.length : null,
+      minRate: row.rates.length ? Math.min(...row.rates) : null,
+      maxRate: row.rates.length ? Math.max(...row.rates) : null,
+    })).sort((a, b) => {
+      if (a.averageRate === null) return 1;
+      if (b.averageRate === null) return -1;
+      return a.averageRate - b.averageRate || a.provider.localeCompare(b.provider, "zh-CN");
+    });
+  }, [filtered, selectedRoute]);
+  const comparableRates = providerComparisons.map((row) => row.averageRate).filter((value): value is number => value !== null);
+  const lowestProviderRate = comparableRates.length ? Math.min(...comparableRates) : 0;
+  const highestProviderRate = comparableRates.length ? Math.max(...comparableRates) : 0;
+  const bestProvider = providerComparisons.find((row) => row.averageRate === lowestProviderRate);
+  const priceSpread = lowestProviderRate > 0 ? (highestProviderRate - lowestProviderRate) / lowestProviderRate * 100 : 0;
 
   const complexRates = filtered.filter((record) => record.hasComplexRate).length;
   const missingWeights = filtered.filter((record) => record.billingWeight === null).length;
@@ -119,11 +168,12 @@ export function LogisticsQuoteDashboard({ report, onSendToAssistant }: Props) {
     `记录总金额 ${amountLabel(totalAmount)}，计费重 ${number.format(totalWeight)}，平均可识别单价 ${averageRate ? money.format(averageRate) : "暂无"}。`,
     `复杂报价 ${complexRates} 条，缺计费重 ${missingWeights} 条，缺运费/总金额 ${missingAmounts} 条。`,
     `主要物流商：${providerRows.slice(0, 5).map((row) => `${row.name} ${row.records}条，金额${amountLabel(row.amount)}`).join("；") || "暂无"}`,
+    selectedRoute ? `当前比价线路：${selectedRoute.route}（${selectedRoute.transport}）；${providerComparisons.map((row) => `${row.provider} 平均单价${row.averageRate === null ? "待复核" : money.format(row.averageRate)}`).join("；") || "暂无可比报价"}。` : "",
   ].join("\n\n"));
 
   return <div className="ct-shell lq-shell">
     <div className="ct-tabs">
-      {(["overview", "rates", "quality"] as View[]).map((key) => <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}>{{ overview: "报价总览", rates: "线路报价", quality: "数据复核" }[key]}</button>)}
+      {(["overview", "rates", "quality"] as View[]).map((key) => <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}>{{ overview: "报价总览", rates: "物流商比价", quality: "数据复核" }[key]}</button>)}
       <span className="ct-tabs-spacer" />
       <button className="ct-ai-action" onClick={sendToAi}><Bot size={14} />交给 AI 分析</button>
     </div>
@@ -149,10 +199,37 @@ export function LogisticsQuoteDashboard({ report, onSendToAssistant }: Props) {
 
       {view === "overview" && <div className="ct-overview-grid">
         <section className="ct-panel"><header><div><small>CARRIER COST</small><h2>物流商报价分布</h2></div><span>TOP 8</span></header><div className="ct-provider-bars">{providerRows.slice(0, 8).map((row) => { const basis = totalAmount > 0 ? row.amount : row.records; const total = totalAmount > 0 ? totalAmount : filtered.length; return <button key={row.name} onClick={() => setFilters((current) => ({ ...current, provider: row.name }))}><span>{row.name}</span><i><b style={{ width: `${total ? basis / total * 100 : 0}%` }} /></i><strong>{totalAmount > 0 ? amountLabel(row.amount) : `${row.records} 条`}</strong></button>; })}</div></section>
-        <section className="ct-panel"><header><div><small>ROUTE COVERAGE</small><h2>常用线路</h2></div><span>按记录数</span></header><div className="lq-route-list">{routeRows.slice(0, 8).map((row) => <article key={`${row.route}-${row.transport}`}><span><strong>{row.route}</strong><small>{row.transport} · {row.providerCount} 家物流商</small></span><b>{row.records} 条</b></article>)}</div></section>
+        <section className="ct-panel"><header><div><small>ROUTE COVERAGE</small><h2>可比线路</h2></div><span>按物流商数</span></header><div className="lq-route-list">{routeRows.slice(0, 8).map((row) => <button key={row.key} onClick={() => { setSelectedRouteKey(row.key); setView("rates"); }}><span><strong>{row.route}</strong><small>{row.transport} · {row.providerCount} 家物流商</small></span><b>查看 {row.records} 条</b></button>)}</div></section>
       </div>}
 
-      {view === "rates" && <section className="ct-panel ct-table-panel"><header><div><small>ROUTE RATE BOOK</small><h2>线路价格对比</h2></div><span>{routeRows.length} 条线路</span></header><div className="ct-table-scroll"><table><thead><tr><th>线路</th><th>运输方式</th><th>物流商数</th><th>记录数</th><th>最低单价</th><th>平均单价</th><th>最高单价</th></tr></thead><tbody>{routeRows.map((row) => <tr key={`${row.route}-${row.transport}`}><td><strong>{row.route}</strong></td><td>{row.transport}</td><td>{row.providerCount}</td><td>{row.records}</td><td>{row.minRate ? money.format(row.minRate) : "—"}</td><td>{row.averageRate ? money.format(row.averageRate) : "—"}</td><td>{row.maxRate ? money.format(row.maxRate) : "—"}</td></tr>)}</tbody></table></div></section>}
+      {view === "rates" && <section className="ct-panel ct-table-panel lq-compare-panel">
+        <header><div><small>CARRIER COMPARISON</small><h2>同线路物流商比价</h2></div><span>按平均单价从低到高</span></header>
+        {selectedRoute ? <>
+          <div className="lq-compare-toolbar">
+            <label><span>对比线路</span><select value={selectedRoute.key} onChange={(event) => setSelectedRouteKey(event.target.value)}>{routeRows.map((row) => <option key={row.key} value={row.key}>{row.route} · {row.transport} · {row.providerCount} 家</option>)}</select></label>
+            <div className="lq-compare-summary">
+              <article><span>可比物流商</span><strong>{providerComparisons.length} 家</strong></article>
+              <article><span>最低平均价</span><strong>{lowestProviderRate ? money.format(lowestProviderRate) : "—"}</strong><small>{bestProvider?.provider || "暂无数值报价"}</small></article>
+              <article><span>最高价差</span><strong>{priceSpread ? `${number.format(priceSpread)}%` : "—"}</strong><small>相对最低平均价</small></article>
+            </div>
+          </div>
+          <div className="ct-table-scroll lq-compare-table"><table><thead><tr><th>物流商</th><th>渠道</th><th>最近报价</th><th>平均单价</th><th>历史价格区间</th><th>比最低价</th><th>样本 / 更新</th></tr></thead><tbody>{providerComparisons.map((row) => {
+            const difference = row.averageRate !== null && lowestProviderRate ? row.averageRate - lowestProviderRate : null;
+            const differencePercent = difference !== null && lowestProviderRate ? difference / lowestProviderRate * 100 : null;
+            const isLowest = row.averageRate !== null && row.averageRate === lowestProviderRate;
+            return <tr key={row.provider} className={isLowest ? "lq-best-provider" : ""}>
+              <td><strong>{row.provider}</strong>{isLowest && <span className="lq-best-tag">当前最低</span>}</td>
+              <td>{row.channels.join("、") || "—"}</td>
+              <td><strong>{row.latest?.unitPrice !== null && row.latest?.unitPrice !== undefined ? money.format(row.latest.unitPrice) : row.latest?.unitPriceText || "—"}</strong>{row.latest?.hasComplexRate && <small>复杂报价，需复核</small>}</td>
+              <td><strong>{row.averageRate === null ? "—" : money.format(row.averageRate)}</strong></td>
+              <td>{row.minRate === null || row.maxRate === null ? "—" : row.minRate === row.maxRate ? money.format(row.minRate) : `${money.format(row.minRate)} - ${money.format(row.maxRate)}`}</td>
+              <td>{isLowest ? <span className="lq-saving">基准</span> : difference === null ? "—" : <span className="lq-price-gap">+{money.format(difference)}<small>+{number.format(differencePercent || 0)}%</small></span>}</td>
+              <td><strong>{row.records} 条</strong><small>{row.latest?.pickupDate || "无日期"}{row.complexRates ? ` · ${row.complexRates} 条待复核` : ""}</small></td>
+            </tr>;
+          })}</tbody></table></div>
+          <p className="lq-compare-note">比较口径：相同发货地、目的地和运输方式；平均价基于当前日期及筛选范围内可识别的数字单价。</p>
+        </> : <div className="ct-empty">当前筛选范围内没有可对比的线路</div>}
+      </section>}
 
       {view === "quality" && <>
         <div className="ct-quality-grid">

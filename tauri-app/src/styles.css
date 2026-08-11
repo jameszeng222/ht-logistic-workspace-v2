@@ -3676,12 +3676,33 @@ body {
 .quote-dashboard-page .transfer-dashboard-title small { color: #386a52; }
 .lq-filter-row { grid-template-columns: repeat(5, minmax(92px, 1fr)) auto; }
 .lq-route-list { display: flex; margin-top: 10px; flex-direction: column; gap: 5px; }
-.lq-route-list article { display: flex; min-width: 0; padding: 8px 9px; align-items: center; justify-content: space-between; gap: 10px; border-radius: 6px; background: #f5f7f6; }
-.lq-route-list article > span { display: flex; min-width: 0; flex-direction: column; }
+.lq-route-list button { display: flex; width: 100%; min-width: 0; padding: 8px 9px; align-items: center; justify-content: space-between; gap: 10px; border: 0; border-radius: 6px; background: #f5f7f6; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.lq-route-list button:hover { background: #e9f2ee; }
+.lq-route-list button > span { display: flex; min-width: 0; flex-direction: column; }
 .lq-route-list strong, .lq-route-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lq-route-list strong { color: #35423c; font-size: 9.5px; }
 .lq-route-list small { color: #929c97; font-size: 8px; }
 .lq-route-list b { flex: 0 0 auto; color: #477566; font-size: 9px; }
+.lq-compare-panel { min-height: 390px; }
+.lq-compare-toolbar { display: grid; margin-top: 14px; padding: 11px; grid-template-columns: minmax(230px, .8fr) minmax(420px, 1.2fr); align-items: stretch; gap: 10px; border-radius: 7px; background: #f3f6f4; }
+.lq-compare-toolbar > label { display: flex; min-width: 0; flex-direction: column; justify-content: center; gap: 5px; }
+.lq-compare-toolbar > label > span { color: #718078; font-size: 8.5px; font-weight: 700; }
+.lq-compare-toolbar select { width: 100%; height: 34px; padding: 0 9px; border: 1px solid #dce4e0; border-radius: 6px; outline: none; background: #fff; color: #35423c; font: inherit; font-size: 10px; }
+.lq-compare-toolbar select:focus { border-color: #6ca99d; box-shadow: 0 0 0 2px rgba(11, 128, 111, .08); }
+.lq-compare-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.lq-compare-summary article { display: flex; min-width: 0; padding: 8px 10px; justify-content: center; flex-direction: column; border-radius: 6px; background: #fff; }
+.lq-compare-summary span, .lq-compare-summary small { overflow: hidden; color: #8a9690; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.lq-compare-summary strong { margin: 2px 0 1px; overflow: hidden; color: #27332d; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.lq-compare-table { max-height: 360px; }
+.lq-compare-table table { min-width: 900px; }
+.lq-compare-table td { height: 48px; }
+.lq-compare-table td > strong, .lq-compare-table td > small { display: block; }
+.lq-compare-table td > small { margin-top: 2px; }
+.lq-best-provider { background: #f1f8f5; }
+.lq-best-tag, .lq-saving { display: inline-flex; margin-top: 3px; padding: 2px 5px; border-radius: 4px; background: #dcefe8; color: #087d6d; font-size: 7.5px; font-weight: 700; }
+.lq-price-gap { color: #875a23; font-weight: 650; }
+.lq-price-gap small { display: block; margin-top: 2px; color: #a17b4c; font-size: 7.5px; }
+.lq-compare-note { margin: 9px 2px 0; color: #8d9792; font-size: 8px; line-height: 1.5; }
 .lq-records { margin-top: 10px; }
 .lq-review-rate { display: inline-block; padding: 2px 5px; border-radius: 4px; background: #f5e8cf; color: #98651e; }
 
@@ -3707,6 +3728,7 @@ body {
   .ct-scroll { padding-right: 18px; padding-left: 18px; }
   .ct-filter-row { grid-template-columns: repeat(3, minmax(90px, 1fr)) auto; }
   .lq-filter-row { grid-template-columns: repeat(3, minmax(90px, 1fr)) auto; }
+  .lq-compare-toolbar { grid-template-columns: 1fr; }
   .ct-period-row { align-items: stretch; flex-direction: column; gap: 7px; }
   .ct-date-range { justify-content: flex-end; }
   .ct-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -3716,6 +3738,7 @@ body {
   .ct-overview-grid, .ct-quality-grid { grid-template-columns: 1fr; }
   .ct-priority-grid { grid-template-columns: 1fr; }
   .ct-tabs > button { padding: 0 8px; font-size: 9.5px; }
+  .lq-compare-summary { grid-template-columns: repeat(3, minmax(100px, 1fr)); overflow: auto; }
 }
 
 /* ============================================================
