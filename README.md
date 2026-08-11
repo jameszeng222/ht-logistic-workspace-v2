@@ -142,11 +142,19 @@ cd pi-extensions
 .\install.ps1
 ```
 
-启动开发环境：
+启动 Tauri 开发环境（Sidecar 会由应用自动启动）：
 
 ```powershell
-.\dev.ps1
+.\tauri-dev.ps1
 ```
+
+只检查本机开发环境，不启动应用：
+
+```powershell
+.\tauri-dev.ps1 -CheckOnly
+```
+
+需要单独观察 Sidecar 启动日志时，仍可使用 `./dev.ps1`。
 
 也可以分别启动：
 
