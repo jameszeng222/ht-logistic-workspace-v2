@@ -5604,3 +5604,290 @@ body {
   .mode-rail-footer { padding-top: 5px; gap: 2px; }
   .mode-rail-model, .mode-rail-settings { height: 34px; }
 }
+
+/* V5: readability and surface hierarchy refresh. */
+:root {
+  --text-xs: 12.5px;
+  --text-sm: 14px;
+  --text-base: 15.5px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 23px;
+}
+
+:root[data-theme="light"] {
+  --bg: #eef2f0;
+  --bg-elevated: #ffffff;
+  --bg-overlay: #fbfcfb;
+  --surface: #f7f9f8;
+  --surface-hover: #edf3f0;
+  --surface-active: #e5ece8;
+  --fg: #202823;
+  --fg-muted: #596760;
+  --fg-subtle: #74817a;
+  --border: #dce4e0;
+  --border-strong: #c6d1cc;
+  --border-subtle: #e6ebe8;
+}
+
+body { line-height: 1.5; }
+
+/* Brand, global navigation and secondary navigation. */
+.header .app-brand-mark { width: 34px; height: 34px; font-size: 11px; }
+.header .app-brand-copy { gap: 5px; }
+.header .app-brand-copy strong,
+.header .app-brand-copy span { font-size: 15px; }
+.header-service-health { color: #5f6d66; font-size: 12px; }
+.mode-rail-item span { font-size: 12.5px; font-weight: 650; }
+.mode-rail-badge { font-size: 10px; }
+.mode-rail-health > span { color: #64716b; font-size: 11px; }
+.assistant-entry strong { font-size: 14.5px; }
+.assistant-entry small { color: #69766f; font-size: 12px; }
+.assistant-history-heading strong,
+.assistant-files-header strong { font-size: 14px; }
+.assistant-history-heading span,
+.assistant-files-header small { color: #74817a; font-size: 12px; }
+.assistant-history-search input { font-size: 13.5px; }
+.assistant-history-main strong,
+.assistant-history-item strong { font-size: 13.5px; }
+.assistant-history-main small,
+.assistant-history-item small,
+.assistant-project-heading span { color: #74817a; font-size: 11.5px; }
+.assistant-project-heading strong { font-size: 13px; }
+
+/* Assistant surface: stronger text, distinct suggestions and composer. */
+.empty-state h2 { color: #1f2823; font-size: 24px; }
+.empty-state p { color: #596760; font-size: 15px; line-height: 1.65; }
+.quick-action-card,
+.empty-suggestion-grid > button {
+  border-color: #dce5e0;
+  background: #f8faf9;
+}
+.quick-action-card:hover,
+.empty-suggestion-grid > button:hover { background: #edf5f1; }
+.quick-action-copy strong { color: #26312c; font-size: 14.5px; }
+.quick-action-copy small { color: #68756f; font-size: 12.5px; }
+.assistant-task-files > header strong { font-size: 14px; }
+.assistant-task-files > header span,
+.assistant-task-file { font-size: 12.5px; }
+.composer-pill { font-size: 12.5px; }
+.composer textarea { color: #26312c; font-size: 15px; line-height: 1.6; }
+.composer textarea::placeholder { color: #7b8781; }
+.msg-author .author-name { font-size: 12px; }
+.msg { font-size: 15px; line-height: 1.65; }
+.reasoning summary,
+.reasoning-content { font-size: 13px; }
+
+/* Tools: separate the list and execution surface without adding heavy dividers. */
+.tools-page-header { background: #f5f8f6; }
+.tools-page-eyebrow { font-size: 11.5px; }
+.tools-page-header h1 { font-size: 24px; }
+.tools-page-header p { color: #5e6b65; font-size: 14px; }
+.tool-view .tools-body { gap: 12px; background: #eef2f0; }
+.tool-view .tools-list,
+.tool-view .tools-detail { background: #f8faf9; }
+.tools-list-title { color: #596760; font-size: 12.5px; }
+.tools-panel .tool-card { min-height: 62px; background: #f1f5f3; }
+.tools-panel .tool-card:hover { background: #eaf1ee; }
+.tools-panel .tool-card.active { background: #ffffff; }
+.tool-card-copy strong { color: #26312c; font-size: 14.5px; }
+.tool-card-copy small { color: #69766f; font-size: 12px; }
+.tool-detail-heading h2 { font-size: 20px; }
+.tool-detail-heading p { color: #596760; font-size: 13.5px; }
+.tool-detail-meta span { color: #64716b; font-size: 11.5px; }
+.tool-workflow strong { font-size: 13px; }
+.tool-workflow small { color: #74817a; font-size: 11.5px; }
+.tool-workflow > div > span { font-size: 12px; }
+.tool-section-heading strong { font-size: 15px; }
+.tool-section-heading small,
+.file-pick-copy small,
+.tool-recent-files > span,
+.tool-recent-files button,
+.tool-query-examples > span,
+.tool-query-examples button { color: #6b7871; font-size: 12px; }
+.file-pick-copy strong,
+.tool-query-form input { font-size: 14px; }
+.tool-reset-button,
+.tool-ai-button,
+.tool-result-placeholder,
+.tool-error strong,
+.tool-file-result strong { font-size: 13px; }
+.tool-file-result small,
+.hs-name small,
+.hs-result-row > span > small,
+.analysis-metrics small,
+.analysis-column-list small,
+.analysis-summary,
+.hs-result-summary { color: #68756f; font-size: 12px; }
+
+/* Shared dashboard chrome. */
+.transfer-dashboard-page,
+.ct-shell { background: #eef2f0; }
+.transfer-dashboard-header {
+  min-height: 96px;
+  padding: 17px 28px;
+  background: #f7f9f8;
+}
+.transfer-dashboard-title > span { width: 44px; height: 44px; flex-basis: 44px; }
+.transfer-dashboard-title small { font-size: 11.5px; }
+.transfer-dashboard-title h1 { margin: 3px 0; font-size: 24px; }
+.transfer-dashboard-title p { color: #64716b; font-size: 13px; }
+.transfer-dashboard-actions > span { color: #64716b; font-size: 12px; }
+.transfer-dashboard-actions select { height: 36px; color: #3f4c46; font-size: 12.5px; }
+.transfer-dashboard-actions button { width: 36px; height: 36px; }
+.transfer-dashboard-empty strong { font-size: 17px; }
+.transfer-dashboard-empty p,
+.transfer-dashboard-empty button { font-size: 13px; }
+
+.ct-tabs { min-height: 50px; background: #f7f9f8; }
+.ct-tabs > button { height: 36px; font-size: 13px; }
+.ct-tabs > button b { font-size: 10px; }
+.ct-filters { padding-top: 12px; padding-bottom: 14px; background: #f7f9f8; }
+.ct-months button,
+.ct-reset { height: 31px; font-size: 12px; }
+.ct-date-range > b,
+.ct-date-range label span,
+.ct-date-range > i,
+.ct-date-range input,
+.ct-filter-row label > span { color: #65726b; font-size: 11.5px; }
+.ct-filter-row select { height: 34px; color: #34413b; font-size: 12.5px; }
+.ct-scroll { padding-top: 16px; }
+.ct-kpis,
+.ct-overview-grid,
+.ct-quality-grid { gap: 12px; }
+.ct-kpis article,
+.ct-panel {
+  border: 1px solid #e2e8e5;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(37, 48, 43, .035);
+}
+.ct-kpis article { min-height: 102px; padding: 15px 16px; }
+.ct-kpis article > span { color: #5f6c65; font-size: 12.5px; }
+.ct-kpis article > strong { margin-top: 7px; font-size: 25px; }
+.ct-kpis article > small { color: #74817a; font-size: 12px; }
+.ct-panel { padding: 17px; }
+.ct-panel > header > div small { font-size: 10.5px; }
+.ct-panel > header h2 { font-size: 16px; }
+.ct-panel > header > span,
+.ct-panel > header > button { color: #68756f; font-size: 12px; }
+.ct-stage-list span,
+.ct-provider-bars span,
+.ct-stage-list strong,
+.ct-provider-bars strong { color: #596760; font-size: 12.5px; }
+.ct-risk-strip { background: #f3f6f4; }
+.ct-risk-strip span { color: #66736d; font-size: 11.5px; }
+.ct-risk-strip b { font-size: 16px; }
+.ct-priority-grid article,
+.ct-quality-list span,
+.lq-route-list button { background: #f3f6f4; }
+.ct-priority-grid article strong,
+.lq-route-list strong { color: #34413b; font-size: 13px; }
+.ct-priority-grid article small,
+.ct-priority-grid article em,
+.ct-quality-list span,
+.lq-route-list small,
+.lq-route-list b { color: #65726b; font-size: 11.5px; }
+.ct-priority-grid article > span,
+.ct-priority-tag,
+.lq-best-tag,
+.lq-saving { font-size: 10.5px; }
+.ct-table-scroll table { color: #4e5b54; font-size: 12.5px; }
+.ct-table-scroll th { background: #f1f5f3; color: #64716b; font-size: 11.5px; }
+.ct-table-scroll td strong { color: #303d36; font-size: 13px; }
+.ct-table-scroll td small { color: #74817a; font-size: 11.5px; }
+.ct-quality-score span { color: #69766f; font-size: 11.5px; }
+
+/* Quote comparison: soft toolbar around white summary cells. */
+.lq-table-action,
+.lq-compare-mode button { font-size: 11.5px; }
+.lq-compare-toolbar { padding: 14px; gap: 12px; background: #f1f5f3; }
+.lq-compare-toolbar > label > span,
+.lq-compare-selectors label > span { color: #5f6d66; font-size: 11.5px; }
+.lq-compare-toolbar select { height: 38px; color: #303d36; font-size: 13px; }
+.lq-compare-summary { gap: 8px; }
+.lq-compare-summary article { padding: 10px 12px; border: 1px solid #e5ebe8; }
+.lq-compare-summary span,
+.lq-compare-summary small { color: #6b7871; font-size: 11.5px; }
+.lq-compare-summary strong { font-size: 15px; }
+.lq-price-gap small,
+.lq-compare-note { color: #74817a; font-size: 11.5px; }
+
+/* Data configuration and analysis. */
+.data-page-header p,
+.data-last-sync { color: #5e6b65; font-size: 13px; }
+.data-eyebrow { font-size: 11.5px; }
+.data-page-header h1 { font-size: 25px; }
+.data-metrics article,
+.data-mapping-section,
+.data-distribution-section,
+.data-anomaly-section,
+.data-columns-section,
+.data-sample-section,
+.data-config-current,
+.data-config-help { border: 1px solid #e2e8e5; background: #ffffff; }
+.data-metrics small,
+.data-metrics span,
+.data-mapping-section header small,
+.data-distribution-section header small,
+.data-anomaly-section header small,
+.data-columns-section header small,
+.data-sample-section header small { color: #68756f; font-size: 12px; }
+.data-mapping-section header strong,
+.data-distribution-section header strong,
+.data-anomaly-section header strong,
+.data-columns-section header strong,
+.data-sample-section header strong { font-size: 15px; }
+.data-mapping-grid label,
+.data-anomaly-list article { background: #f4f7f5; }
+.data-mapping-grid label strong,
+.data-anomaly-list strong,
+.data-column-row strong { font-size: 12.5px; }
+.data-mapping-grid label small,
+.data-anomaly-list small,
+.data-quality-ok small,
+.data-config-status-grid small { color: #6c7972; font-size: 11.5px; }
+.data-column-row,
+.data-sample-scroll table { font-size: 12.5px; }
+.data-column-row.head,
+.data-sample-scroll th { color: #64716b; font-size: 11.5px; }
+.data-config-current > header small { font-size: 11.5px; }
+.data-config-current p,
+.data-config-help ol,
+.data-config-help p { color: #5f6d66; font-size: 12.5px; }
+.data-config-status-grid strong,
+.data-config-help > strong { font-size: 14px; }
+
+/* Email module follows the same readable type floor. */
+.email-monitor-side-heading small,
+.email-monitor-switch small,
+.email-monitor-side-label,
+.email-account > header small,
+.email-monitor-settings label > span,
+.email-list-copy time,
+.email-list-copy > em,
+.email-list-meta b,
+.email-monitor-detail > header small,
+.email-monitor-detail > header p,
+.email-detail-facts small,
+.email-status-badge { color: #68756f; font-size: 11.5px; }
+.email-monitor-switch strong,
+.email-list-copy strong,
+.email-detail-facts strong,
+.email-monitor-detail > section h3 { font-size: 13.5px; }
+.email-monitor-header p,
+.email-monitor-count,
+.email-monitor-tabs button,
+.email-monitor-toolbar input,
+.email-monitor-detail > section p,
+.email-monitor-detail > footer button { font-size: 13px; }
+
+@media (min-width: 761px) and (max-width: 900px) {
+  .tool-card-copy strong { font-size: 13.5px; }
+  .ct-filter-row { grid-template-columns: repeat(3, minmax(100px, 1fr)); }
+  .lq-filter-row { grid-template-columns: repeat(3, minmax(100px, 1fr)); }
+  .lq-compare-toolbar,
+  .lq-channel-toolbar { grid-template-columns: 1fr; }
+  .ct-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ct-overview-grid,
+  .ct-quality-grid { grid-template-columns: 1fr; }
+}
