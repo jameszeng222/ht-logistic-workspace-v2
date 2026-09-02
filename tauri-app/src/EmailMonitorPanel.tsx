@@ -377,7 +377,7 @@ export function EmailMonitorPanel({ active, onSendToAssistant, onAttentionCount 
       <section className={`email-monitor-page ${active ? "active" : ""}`}>
         <header className="email-monitor-header">
           <div>
-            <span>MAIL INTELLIGENCE</span>
+            <span>业务中心 / 邮件监控</span>
             <h1>重点邮件</h1>
             <p>{store.lastChecked ? `上次检查 ${new Date(store.lastChecked).toLocaleString("zh-CN")}` : "尚未执行检查"}</p>
           </div>

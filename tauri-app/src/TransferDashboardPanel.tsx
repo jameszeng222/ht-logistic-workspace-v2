@@ -135,7 +135,7 @@ export function TransferDashboardPanel({ onOpenConfig, onSendToAssistant }: Prop
       <header className="transfer-dashboard-header">
         <div className="transfer-dashboard-title">
           <span><BarChart3 size={20} /></span>
-          <div><small>TRANSFER OPERATIONS</small><h1>{activeDashboard.name || "调拨数据看板"}</h1><p>{report?.sourceName || activeDashboard.source.tableName || "等待配置数据来源"}</p></div>
+          <div><small>数据中心 / 履约时效</small><h1>{activeDashboard.name || "调拨数据看板"}</h1><p>{report?.sourceName || activeDashboard.source.tableName || "等待配置数据来源"}</p></div>
         </div>
         <div className="transfer-dashboard-actions">
           {dashboards.length > 1 && <select value={activeId} onChange={(event) => setActiveId(event.target.value)} aria-label="切换看板">{dashboards.map((dashboard) => <option key={dashboard.id} value={dashboard.id}>{dashboard.name}</option>)}</select>}

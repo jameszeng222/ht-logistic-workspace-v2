@@ -651,7 +651,7 @@ export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard }: Logis
       <section className="logistics-data-page">
         <header className="data-page-header">
           <div>
-            <span className="data-eyebrow">DATA SETTINGS</span>
+            <span className="data-eyebrow">系统设置 / 数据来源</span>
             <h1>数据配置</h1>
             <p>在这里管理飞书连接、数据表、同步频率和多个业务看板。</p>
           </div>

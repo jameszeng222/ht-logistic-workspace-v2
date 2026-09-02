@@ -60,6 +60,7 @@ import {
 } from "lucide-react";
 import pilotAvatar from "./assets/pilot-avatar.png";
 import "./styles.css";
+import "./workspace-v6.css";
 
 // ============ 类型 ============
 interface Toast { id: number; msg: string; type: "info"|"error"|"success"; }
@@ -1702,7 +1703,7 @@ export default function App() {
       <header className="header">
         <div className="app-brand">
           <span className="app-brand-mark">HT</span>
-          <span className="app-brand-copy"><strong>Logistic</strong><span>Workspace</span></span>
+          <span className="app-brand-copy"><strong>HT Logistics</strong><span>Operations Workspace</span></span>
         </div>
         <span className={`header-status ${ready ? (busy ? "busy" : "ready") : "error"}`}>
           <span className="dot" />
@@ -1767,7 +1768,7 @@ export default function App() {
               title="AI 助手"
             >
               <MessageSquare size={19} />
-              <span>AI 助手</span>
+              <span>助手</span>
             </button>
             <button
               className={`mode-rail-item ${workspaceView === "tool" ? "active" : ""}`}
@@ -1783,7 +1784,7 @@ export default function App() {
               title="调拨看板"
             >
               <ChartNoAxesCombined size={19} />
-              <span>调拨看板</span>
+              <span>调拨</span>
             </button>
             <button
               className={`mode-rail-item ${workspaceView === "quote" ? "active" : ""}`}
@@ -1791,7 +1792,7 @@ export default function App() {
               title="物流报价"
             >
               <CircleDollarSign size={19} />
-              <span>物流报价</span>
+              <span>报价</span>
             </button>
             <button
               className={`mode-rail-item ${workspaceView === "data" ? "active" : ""}`}
@@ -1799,7 +1800,7 @@ export default function App() {
               title="数据配置"
             >
               <Sheet size={19} />
-              <span>数据配置</span>
+              <span>数据</span>
             </button>
             <button
               className={`mode-rail-item ${workspaceView === "email" ? "active" : ""}`}
@@ -1807,7 +1808,7 @@ export default function App() {
               title="邮件监控"
             >
               <Mail size={19} />
-              <span>邮件监控</span>
+              <span>邮件</span>
               {emailAttentionCount > 0 && <i className="mode-rail-badge">{emailAttentionCount > 99 ? "99+" : emailAttentionCount}</i>}
             </button>
           </nav>

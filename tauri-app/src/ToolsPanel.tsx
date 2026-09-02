@@ -545,7 +545,7 @@ export const ToolsPanel = forwardRef<ToolsPanelHandle, ToolsPanelProps>(function
     <div className="tools-panel tool-page">
       <header className="tools-page-header">
         <div>
-          <span className="tools-page-eyebrow">BUSINESS AUTOMATION</span>
+          <span className="tools-page-eyebrow">业务中心 / 自动化工具</span>
           <h1>物流工具</h1>
           <p>选择工具并提供输入，执行结果可以继续交给 AI 助手检查。</p>
         </div>

@@ -108,7 +108,7 @@ export function LogisticsQuotePanel({ onOpenConfig, onSendToAssistant }: Props) 
   const sourceName = useMemo(() => report?.sourceName || dashboard.source.tableName || "大货运费表", [dashboard.source.tableName, report?.sourceName]);
   return <section className="transfer-dashboard-page quote-dashboard-page" aria-label="物流报价看板">
     <header className="transfer-dashboard-header">
-      <div className="transfer-dashboard-title"><span><CircleDollarSign size={20} /></span><div><small>LOGISTICS QUOTATION</small><h1>物流报价</h1><p>{sourceName}</p></div></div>
+      <div className="transfer-dashboard-title"><span><CircleDollarSign size={20} /></span><div><small>数据中心 / 报价分析</small><h1>物流报价</h1><p>{sourceName}</p></div></div>
       <div className="transfer-dashboard-actions">
         {savedAt && <span><CheckCircle2 size={14} />{new Date(savedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>}
         <button type="button" onClick={() => syncDashboard(false)} disabled={syncing} title="同步最新报价">{syncing ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}</button>
