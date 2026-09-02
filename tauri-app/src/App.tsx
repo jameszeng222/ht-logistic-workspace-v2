@@ -24,6 +24,7 @@ import { FileBrowser } from "./FileBrowser";
 import { LogisticsDataPanel } from "./LogisticsDataPanel";
 import { LogisticsQuotePanel } from "./LogisticsQuotePanel";
 import { TransferDashboardPanel } from "./TransferDashboardPanel";
+import { isWebPreview } from "./webPreview";
 import { EmailMonitorPanel } from "./EmailMonitorPanel";
 import { checkUpdate, downloadAndInstallUpdate, type UpdateStatus } from "./updater";
 import type { ToolCall, AssistantMsg, Turn } from "./types";
@@ -237,7 +238,7 @@ export default function App() {
   const [currentModel, setCurrentModel] = useState<ModelInfo | null>(null);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showPermissionDropdown, setShowPermissionDropdown] = useState(false);
-  const [workspaceView, setWorkspaceView] = useState<"assistant" | "tool" | "dashboard" | "quote" | "data" | "email">("assistant");
+  const [workspaceView, setWorkspaceView] = useState<"assistant" | "tool" | "dashboard" | "quote" | "data" | "email">(isWebPreview ? "quote" : "assistant");
   const [emailAttentionCount, setEmailAttentionCount] = useState(0);
   const [assistantSidebarView, setAssistantSidebarView] = useState<"quick" | "files">("quick");
   const [contextPanelTab, setContextPanelTab] = useState<"files" | "outputs">("files");
@@ -878,6 +879,11 @@ export default function App() {
     getVersion().then(setAppVersion).catch(() => setAppVersion("unknown"));
   }, []);
   useEffect(() => {
+    if (isWebPreview) {
+      setReady(false);
+      addLogRef.current("event", "web_preview · 在线界面预览，不连接本地服务");
+      return;
+    }
     let cancelled = false;
     let unlisten: UnlistenFn | undefined;
     let unlistenStderr: UnlistenFn | undefined;

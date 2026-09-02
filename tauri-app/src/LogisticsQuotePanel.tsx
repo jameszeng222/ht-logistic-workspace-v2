@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, CircleDollarSign, Database, LoaderCircle, 
 import { loadDashboardSnapshot, saveDashboardSnapshot } from "./dashboardStorage";
 import { LogisticsQuoteDashboard, type LogisticsQuoteReport } from "./LogisticsQuoteDashboard";
 import { loadDashboardConfigs, saveDashboardConfigs, type TransferDashboardConfig } from "./transferDashboardConfig";
+import { isWebPreview, WEB_PREVIEW_QUOTE_REPORT } from "./webPreview";
 
 interface Props {
   onOpenConfig: () => void;
@@ -23,8 +24,8 @@ export function LogisticsQuotePanel({ onOpenConfig, onSendToAssistant }: Props) 
     setLoading(true);
     try {
       const snapshot = await loadDashboardSnapshot<LogisticsQuoteReport>(dashboard.id);
-      setReport(snapshot?.report || null);
-      setSavedAt(snapshot?.savedAt || null);
+      setReport(snapshot?.report || (isWebPreview ? WEB_PREVIEW_QUOTE_REPORT : null));
+      setSavedAt(snapshot?.savedAt || (isWebPreview ? Date.parse(WEB_PREVIEW_QUOTE_REPORT.updatedAt) : null));
     } catch (reason) {
       setError(`读取本地报价看板失败：${String(reason)}`);
     } finally {
@@ -48,6 +49,10 @@ export function LogisticsQuotePanel({ onOpenConfig, onSendToAssistant }: Props) 
 
   const syncDashboard = useCallback(async (background = false) => {
     if (syncingRef.current) return;
+    if (isWebPreview) {
+      if (!background) setError("在线预览不连接本地飞书服务；桌面版中可同步真实数据。");
+      return;
+    }
     if (!dashboard.source.url || !dashboard.source.tableId) {
       if (!background) setError("请先到数据配置中选择大货运费表");
       return;
