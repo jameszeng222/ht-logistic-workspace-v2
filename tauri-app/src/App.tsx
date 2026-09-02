@@ -632,8 +632,7 @@ export default function App() {
           let next = flushed.map((t) => t.status === "streaming"
             ? { ...t, status: "done" as const, assistantMsgs: t.assistantMsgs.map((message) => ({ ...message, streaming: false })) }
             : t);
-          // 过滤 Pi 输出的教程欢迎语（命中教程签名即过滤，不要求 userMessage 为空，
-          // 因为 Pi 会把教程当首条消息的回复输出）。
+          // 过滤完整的 Pi 教程欢迎语；普通的“我是 Pi/Pilot”身份回答必须保留。
           next = next.filter((t) => {
             const assistantText = t.assistantMsgs.map((m) => m.text).join("");
             return !isTutorialWelcome(t.userMessage, assistantText);
@@ -676,6 +675,22 @@ export default function App() {
         if (message?.role === "assistant") finishAssistantMessage(message);
         break;
       }
+      case "turn_end": {
+        const message = (ev as any).message;
+        // 部分 provider 只稳定发送 turn_end。若 message_end 尚未收尾，使用这里的
+        // 完整消息补全流式内容；已经收尾时 currentMsgId 为空，不重复添加消息。
+        if (message?.role === "assistant" && currentTurnId.current && currentMsgId.current) {
+          finishAssistantMessage(message);
+        }
+        addLog("event", "turn_end · 本轮完成");
+        break;
+      }
+      case "agent_settled":
+        addLog("event", "agent_settled · 会话已稳定");
+        break;
+      case "session_info_changed":
+        addLog("event", `session_info_changed · ${(ev as any).name || "会话信息已更新"}`);
+        break;
       case "tool_execution_start":
         const tc: ToolCall = { id: ev.toolCallId, name: ev.toolName, args: ev.args, status: "running" };
         setTurns((prev) => prev.map((t) =>

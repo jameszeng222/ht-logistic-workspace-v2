@@ -42,6 +42,8 @@ export type PiEvent =
   | { type: "agent_end"; messages: any[] }
   | { type: "turn_start" }
   | { type: "turn_end"; message: any; toolResults: any[] }
+  | { type: "agent_settled" }
+  | { type: "session_info_changed"; name?: string }
   | { type: "message_start"; message: any }
   | { type: "message_update"; message: any; assistantMessageEvent: AssistantMessageEvent }
   | { type: "message_end"; message: any }

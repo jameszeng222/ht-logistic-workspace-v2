@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { rebuildTurnsFromMessages, extractAssistantMessageContent, extractTextFromContent, formatPiError } from "./utils";
+import { rebuildTurnsFromMessages, extractAssistantMessageContent, extractTextFromContent, formatPiError, isTutorialWelcome } from "./utils";
 
 describe("extractTextFromContent", () => {
   it("字符串直接返回", () => {
@@ -35,6 +35,18 @@ describe("assistant stream helpers", () => {
 
   it("把 tiers 配置错误转换成可操作提示", () => {
     expect(formatPiError("Cannot read properties of undefined (reading 'tiers')")).toContain("自动修复");
+  });
+});
+
+describe("isTutorialWelcome", () => {
+  it("不会把模型身份回答误判成教程", () => {
+    expect(isTutorialWelcome("你是什么模型", "我是 Pilot，一个面向物流工作的 AI 助手。")).toBe(false);
+    expect(isTutorialWelcome("你是什么模型", "我是 Pi，可以协助你完成任务。")).toBe(false);
+  });
+
+  it("仍然识别完整的 Pi 教程欢迎语", () => {
+    expect(isTutorialWelcome("帮我做个工具", "欢迎来到 Pi，这是一次教程之旅。你想搭个什么小工具？")).toBe(true);
+    expect(isTutorialWelcome("", "Welcome to Pi — your local agentic coding environment")).toBe(true);
   });
 });
 

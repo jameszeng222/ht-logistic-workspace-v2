@@ -3,31 +3,25 @@
 
 import type { Turn, AssistantMsg, ToolCall } from "./types";
 
-// Pi 在新建会话时会输出一段教程欢迎语（中英文皆有），可能作为对首条消息的回复出现，
-// 也可能无前置 user 消息自发输出。这里统一过滤掉。
-// 判定：助手文本命中教程签名即可，不要求 userMessage 为空（Pi 会把教程当首条消息的回复）。
+// Pi 在新建会话时可能输出一整段教程欢迎语。教程内容包含多个稳定片段，
+// 不能用“我是 Pi”这类普通自我介绍判断，否则“我是 Pilot”也会被误删。
 const TUTORIAL_SIGNATURES = [
-  // 英文签名
-  "Welcome to Pi — your",
-  "Welcome to Pi - your",
-  "Welcome to Pi — your local",
+  "Welcome to Pi",
   "interactive tutorial",
   "agentic coding environment",
   "What kind of small app would you like to build",
-  // 中文签名
   "欢迎来到 Pi",
   "欢迎来到Pi",
   "教程之旅",
-  "我是 Pi",
-  "我是Pi",
-  "你的 AI 编程搭档",
-  "AI 编程搭档",
   "协作方式",
   "你想搭个什么小东西",
   "你想搭个什么小工具",
 ];
 export function isTutorialWelcome(userMessage: string, assistantText: string): boolean {
-  return TUTORIAL_SIGNATURES.some((s) => assistantText.includes(s));
+  const matches = TUTORIAL_SIGNATURES.filter((signature) => assistantText.includes(signature)).length;
+  // 无用户消息时，一个明确教程片段即可判断为 Pi 自发欢迎语；作为正常问题的回复时，
+  // 至少需要两个教程片段，避免误伤模型身份介绍或用户引用教程文字的场景。
+  return userMessage.trim() ? matches >= 2 : matches >= 1;
 }
 
 /**
@@ -113,9 +107,7 @@ export function rebuildTurnsFromMessages(messages: any[]): Turn[] {
       }
     }
   }
-  // 过滤掉 Pi 输出的教程欢迎语（命中教程签名即过滤整个 turn，包括用户首条消息）。
-  // Pi 会把教程当首条消息的回复输出，过滤后用户首条消息也一并移除，
-  // 避免出现"有问无答"的孤立 user 消息。
+  // 只过滤完整的 Pi 教程欢迎语；普通模型身份介绍必须保留。
   return turns.filter((t) => {
     const assistantText = t.assistantMsgs.map((m) => m.text).join("");
     return !isTutorialWelcome(t.userMessage, assistantText);
