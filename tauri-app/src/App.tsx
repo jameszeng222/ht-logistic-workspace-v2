@@ -1795,14 +1795,6 @@ export default function App() {
               <span>报价</span>
             </button>
             <button
-              className={`mode-rail-item ${workspaceView === "data" ? "active" : ""}`}
-              onClick={() => setWorkspaceView("data")}
-              title="数据配置"
-            >
-              <Sheet size={19} />
-              <span>数据</span>
-            </button>
-            <button
               className={`mode-rail-item ${workspaceView === "email" ? "active" : ""}`}
               onClick={() => setWorkspaceView("email")}
               title="邮件监控"
@@ -1813,6 +1805,14 @@ export default function App() {
             </button>
           </nav>
           <div className="mode-rail-footer">
+            <button
+              className={`mode-rail-data ${workspaceView === "data" ? "active" : ""}`}
+              onClick={() => setWorkspaceView("data")}
+              title="数据配置"
+              aria-label="数据配置"
+            >
+              <span className="mode-rail-footer-icon"><Sheet size={16} /></span>
+            </button>
             <button
               ref={railModelBtnRef}
               className="mode-rail-model"
