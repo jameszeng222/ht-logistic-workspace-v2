@@ -34,6 +34,7 @@ import {
   ShieldCheck,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 
 interface FeishuConnection {
@@ -115,6 +116,8 @@ interface LogisticsReport {
 interface LogisticsDataPanelProps {
   onSendToAssistant: (message: string) => void;
   onOpenDashboard: (kind: DashboardKind) => void;
+  compact?: boolean;
+  onClose?: () => void;
 }
 
 interface StoredDashboardReport { rows: number; sourceName?: string }
@@ -170,7 +173,7 @@ function kindLabel(kind: string): string {
   return "文本";
 }
 
-export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard }: LogisticsDataPanelProps) {
+export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard, compact = false, onClose }: LogisticsDataPanelProps) {
   const [dashboards, setDashboards] = useState<TransferDashboardConfig[]>(loadDashboardConfigs);
   const [activeDashboardId, setActiveDashboardId] = useState(() => {
     return getActiveDashboardId(dashboards);
@@ -546,6 +549,82 @@ export function LogisticsDataPanel({ onSendToAssistant, onOpenDashboard }: Logis
       `异常：\n${anomalyText}`,
     ].join("\n\n"));
   }, [onSendToAssistant, report]);
+
+  if (compact) {
+    return (
+      <section className="data-basic-config" aria-label="数据基础配置">
+        <header className="data-basic-header">
+          <div>
+            <span><Database size={18} /></span>
+            <div><strong>数据基础配置</strong><small>飞书连接、数据来源与自动同步</small></div>
+          </div>
+          <button type="button" onClick={onClose} title="关闭" aria-label="关闭数据配置"><X size={17} /></button>
+        </header>
+
+        <div className="data-basic-scroll">
+          {error && <div className="data-error data-basic-error"><AlertTriangle size={16} /><span>{error}</span><button type="button" onClick={() => setError(null)}>×</button></div>}
+
+          <label className="data-basic-field">
+            <span>配置对象</span>
+            <select value={activeDashboardId} onChange={(event) => setActiveDashboardId(event.target.value)} aria-label="选择数据看板">
+              {dashboards.map((dashboard) => <option key={dashboard.id} value={dashboard.id}>{dashboard.name}</option>)}
+            </select>
+          </label>
+
+          <section className={`data-basic-connection ${connection.configured ? "connected" : ""}`}>
+            <div>
+              <span>{connection.configured ? <ShieldCheck size={17} /> : <KeyRound size={17} />}</span>
+              <div><strong>{connection.configured ? "飞书应用已连接" : "连接飞书应用"}</strong><small>{connection.configured ? connection.appId : "凭据仅保存在本机"}</small></div>
+            </div>
+            <button type="button" onClick={() => setShowCredentials((value) => !value)}>{showCredentials ? "收起" : connection.configured ? "修改" : "配置"}</button>
+          </section>
+
+          {showCredentials && <section className="data-basic-credentials">
+            <label><span>App ID</span><input value={appId} onChange={(event) => setAppId(event.target.value)} placeholder="cli_xxxxxxxxx" /></label>
+            <label><span>App Secret</span><input type="password" value={appSecret} onChange={(event) => setAppSecret(event.target.value)} placeholder={connection.configured ? "重新输入应用密钥" : "输入应用密钥"} /></label>
+            <div>
+              {connection.configured && <button className="data-text-button danger" type="button" onClick={clearCredentials}>清除连接</button>}
+              <button className="data-primary-button compact" type="button" onClick={saveCredentials} disabled={loading === "credentials"}>
+                {loading === "credentials" ? <LoaderCircle className="spin" size={14} /> : <Save size={14} />}保存连接
+              </button>
+            </div>
+          </section>}
+
+          <section className="data-basic-source">
+            <label className="data-basic-field"><span>Wiki / Base 链接</span><div className="data-input-with-icon"><Link2 size={14} /><input value={baseSource.url} onChange={(event) => setBaseSource({ url: event.target.value, tableId: "", tableName: "", viewId: "" })} placeholder="粘贴飞书多维表格链接" /></div></label>
+            <button className="data-secondary-button" type="button" onClick={loadBaseTables} disabled={!connection.configured || loading === "base-tables"}>
+              {loading === "base-tables" ? <LoaderCircle className="spin" size={15} /> : <CloudDownload size={15} />}读取数据表
+            </button>
+            <label className="data-basic-field"><span>数据表</span><select value={baseSource.tableId} onChange={(event) => {
+              const tableId = event.target.value;
+              setBaseSource((current) => ({ ...current, tableId, tableName: baseTables.find((table) => table.table_id === tableId)?.name || "" }));
+            }} disabled={!baseTables.length && !baseSource.tableId}>
+              <option value="">{baseTables.length ? "选择数据表" : "连接后显示"}</option>
+              {!baseTables.length && baseSource.tableId && <option value={baseSource.tableId}>{baseSource.tableName || "已保存的数据表"}</option>}
+              {baseTables.map((table) => <option key={table.table_id} value={table.table_id}>{table.name}</option>)}
+            </select></label>
+          </section>
+
+          <section className="data-basic-sync">
+            <label><input type="checkbox" checked={activeDashboard.autoSync} onChange={(event) => updateActiveDashboard({ autoSync: event.target.checked })} /><span>自动同步</span></label>
+            <select value={activeDashboard.intervalMinutes} onChange={(event) => updateActiveDashboard({ intervalMinutes: Number(event.target.value) })} disabled={!activeDashboard.autoSync} aria-label="自动同步频率">
+              <option value={15}>每 15 分钟</option><option value={30}>每 30 分钟</option><option value={60}>每小时</option><option value={180}>每 3 小时</option><option value={360}>每 6 小时</option>
+            </select>
+          </section>
+        </div>
+
+        <footer className="data-basic-footer">
+          <span>{baseSource.tableName || "尚未选择数据表"}</span>
+          <div>
+            <button className="data-secondary-button" type="button" onClick={onClose}>取消</button>
+            <button className="data-primary-button compact" type="button" onClick={() => syncBase(false)} disabled={!connection.configured || !baseSource.tableId || loading === "sync"}>
+              {loading === "sync" ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}立即同步
+            </button>
+          </div>
+        </footer>
+      </section>
+    );
+  }
 
   return (
     <>

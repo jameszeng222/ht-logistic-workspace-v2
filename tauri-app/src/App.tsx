@@ -239,7 +239,7 @@ export default function App() {
   const [currentModel, setCurrentModel] = useState<ModelInfo | null>(null);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showPermissionDropdown, setShowPermissionDropdown] = useState(false);
-  const [workspaceView, setWorkspaceView] = useState<"assistant" | "tool" | "dashboard" | "quote" | "data" | "email">(isWebPreview ? "quote" : "assistant");
+  const [workspaceView, setWorkspaceView] = useState<"assistant" | "tool" | "dashboard" | "quote" | "email">(isWebPreview ? "quote" : "assistant");
   const [emailAttentionCount, setEmailAttentionCount] = useState(0);
   const [assistantSidebarView, setAssistantSidebarView] = useState<"quick" | "files">("quick");
   const [contextPanelTab, setContextPanelTab] = useState<"files" | "outputs">("files");
@@ -270,6 +270,7 @@ export default function App() {
 
   // 设置面板
   const [showSettings, setShowSettings] = useState(false);
+  const [showDataConfig, setShowDataConfig] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ kind: "idle" });
   const [appVersion, setAppVersion] = useState<string>("");
   const [autoCompaction, setAutoCompaction] = useState(true);
@@ -1806,8 +1807,8 @@ export default function App() {
           </nav>
           <div className="mode-rail-footer">
             <button
-              className={`mode-rail-data ${workspaceView === "data" ? "active" : ""}`}
-              onClick={() => setWorkspaceView("data")}
+              className="mode-rail-data"
+              onClick={() => setShowDataConfig(true)}
               title="数据配置"
               aria-label="数据配置"
             >
@@ -2005,19 +2006,9 @@ export default function App() {
           </div>
         </aside>}
 
-        {workspaceView === "data" && (
-          <LogisticsDataPanel
-            onOpenDashboard={(kind) => setWorkspaceView(kind === "quote" ? "quote" : "dashboard")}
-            onSendToAssistant={(message) => {
-              setWorkspaceView("assistant");
-              send(message);
-            }}
-          />
-        )}
-
         {workspaceView === "dashboard" && (
           <TransferDashboardPanel
-            onOpenConfig={() => setWorkspaceView("data")}
+            onOpenConfig={() => setShowDataConfig(true)}
             onSendToAssistant={(message) => {
               setWorkspaceView("assistant");
               send(message);
@@ -2027,7 +2018,7 @@ export default function App() {
 
         {workspaceView === "quote" && (
           <LogisticsQuotePanel
-            onOpenConfig={() => setWorkspaceView("data")}
+            onOpenConfig={() => setShowDataConfig(true)}
             onSendToAssistant={(message) => {
               setWorkspaceView("assistant");
               send(message);
@@ -2605,6 +2596,26 @@ export default function App() {
               <button className="btn-secondary" onClick={() => { setLogs([]); }}>清空</button>
               <button className="btn-primary" onClick={() => setShowLogViewer(false)}>关闭</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showDataConfig && (
+        <div className="modal-overlay data-config-overlay" onClick={() => setShowDataConfig(false)}>
+          <div className="modal data-config-modal" onClick={(event) => event.stopPropagation()}>
+            <LogisticsDataPanel
+              compact
+              onClose={() => setShowDataConfig(false)}
+              onOpenDashboard={(kind) => {
+                setShowDataConfig(false);
+                setWorkspaceView(kind === "quote" ? "quote" : "dashboard");
+              }}
+              onSendToAssistant={(message) => {
+                setShowDataConfig(false);
+                setWorkspaceView("assistant");
+                send(message);
+              }}
+            />
           </div>
         </div>
       )}
