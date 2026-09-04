@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, Bot, CircleDollarSign, FileWarning, Scale, Truck } from "lucide-react";
+import { LieflatTickRows } from "./LieflatTickRows";
 
 export interface LogisticsQuoteRecord {
   pickupDate: string | null;
@@ -311,7 +312,7 @@ export function LogisticsQuoteDashboard({ report, onSendToAssistant }: Props) {
       </section>
 
       {view === "overview" && <div className="ct-overview-grid">
-        <section className="ct-panel"><header><div><small>CARRIER COST</small><h2>物流商报价分布</h2></div><span>点击查看渠道</span></header><div className="ct-provider-bars">{providerRows.slice(0, 8).map((row) => { const basis = totalAmount > 0 ? row.amount : row.records; const total = totalAmount > 0 ? totalAmount : filtered.length; return <button key={row.name} onClick={() => openProviderChannels(row.name)}><span>{row.name}</span><i><b style={{ width: `${total ? basis / total * 100 : 0}%` }} /></i><strong>{totalAmount > 0 ? amountLabel(row.amount) : `${row.records} 条`}</strong></button>; })}</div></section>
+        <section className="ct-panel"><header><div><small>CARRIER COST</small><h2>金额主要集中在哪些物流商</h2></div><span>点击查看渠道</span></header><LieflatTickRows rows={providerRows.slice(0, 8).map((row, index) => ({ label: row.name, value: totalAmount > 0 ? row.amount : row.records, detail: `${row.records} 条`, highlight: index === 0 }))} formatValue={(value) => totalAmount > 0 ? amountLabel(value) : `${number.format(value)} 条`} unitLabel={(unit) => totalAmount > 0 ? amountLabel(unit) : `${number.format(unit)} 条`} onSelect={(row) => openProviderChannels(row.label)} /></section>
         <section className="ct-panel"><header><div><small>ROUTE COVERAGE</small><h2>可比线路</h2></div><span>按物流商数</span></header><div className="lq-route-list">{routeRows.slice(0, 8).map((row) => <button key={row.key} onClick={() => { setSelectedRouteKey(row.key); setView("rates"); }}><span><strong>{row.route}</strong><small>{row.transport} · {row.providerCount} 家物流商</small></span><b>查看 {row.records} 条</b></button>)}</div></section>
         <section className="ct-panel ct-table-panel lq-coverage-panel"><header><div><small>CARRIER × CHANNEL</small><h2>物流商与渠道覆盖</h2></div><span>{providerCoverageRows.length} 家物流商</span></header><div className="ct-table-scroll"><table><thead><tr><th>物流商</th><th>渠道数</th><th>覆盖线路</th><th>报价记录</th><th>平均单价</th><th>记录金额</th><th>待复核</th><th></th></tr></thead><tbody>{providerCoverageRows.map((row) => <tr key={row.provider}><td><strong>{row.provider}</strong></td><td>{row.channelCount}</td><td>{row.routeCount}</td><td>{row.records}</td><td>{row.averageRate === null ? "—" : money.format(row.averageRate)}</td><td>{amountLabel(row.amount)}</td><td>{row.complexRates || "—"}</td><td><button className="lq-table-action" onClick={() => openProviderChannels(row.provider)}>查看渠道</button></td></tr>)}</tbody></table></div></section>
       </div>}
@@ -326,6 +327,10 @@ export function LogisticsQuoteDashboard({ report, onSendToAssistant }: Props) {
               <article><span>最低平均价</span><strong>{lowestProviderRate ? money.format(lowestProviderRate) : "—"}</strong><small>{bestProvider?.provider || "暂无数值报价"}</small></article>
               <article><span>最高价差</span><strong>{priceSpread ? `${number.format(priceSpread)}%` : "—"}</strong><small>相对最低平均价</small></article>
             </div>
+          </div>
+          <div className="lq-compare-visual">
+            <div><small>PRICE LADDER</small><h3>{bestProvider ? `${bestProvider.provider} 是当前最低平均价` : "当前线路尚无可识别价格"}</h3><p>{selectedRoute.route} · {selectedRoute.transport} · 价格越靠左越低</p></div>
+            <LieflatTickRows rows={providerComparisons.filter((row) => row.averageRate !== null).map((row) => ({ label: row.provider, value: row.averageRate || 0, detail: `${row.records} 条样本`, highlight: row.averageRate === lowestProviderRate }))} formatValue={(value) => money.format(value)} unitLabel={(unit) => money.format(unit)} />
           </div>
           <div className="ct-table-scroll lq-compare-table"><table><thead><tr><th>物流商</th><th>渠道</th><th>最近报价</th><th>平均单价</th><th>历史价格区间</th><th>比最低价</th><th>样本 / 更新</th></tr></thead><tbody>{providerComparisons.map((row) => {
             const difference = row.averageRate !== null && lowestProviderRate ? row.averageRate - lowestProviderRate : null;
@@ -355,6 +360,10 @@ export function LogisticsQuoteDashboard({ report, onSendToAssistant }: Props) {
               <article><span>最低平均价</span><strong>{lowestChannelRate ? money.format(lowestChannelRate) : "—"}</strong><small>{bestChannel?.channel || "暂无数值报价"}</small></article>
               <article><span>渠道最高价差</span><strong>{channelSpread ? `${number.format(channelSpread)}%` : "—"}</strong><small>相对最低平均价</small></article>
             </div>
+          </div>
+          <div className="lq-compare-visual">
+            <div><small>CHANNEL LADDER</small><h3>{bestChannel ? `${bestChannel.channel} 是当前最低平均价渠道` : "当前渠道尚无可识别价格"}</h3><p>{selectedProvider.provider} · {selectedProviderRoute.route} · {selectedProviderRoute.transport}</p></div>
+            <LieflatTickRows rows={channelComparisons.filter((row) => row.averageRate !== null).map((row) => ({ label: row.channel, value: row.averageRate || 0, detail: `${row.records} 条样本`, highlight: row.averageRate === lowestChannelRate }))} formatValue={(value) => money.format(value)} unitLabel={(unit) => money.format(unit)} />
           </div>
           <div className="ct-table-scroll lq-compare-table"><table><thead><tr><th>渠道</th><th>最近报价</th><th>平均单价</th><th>历史价格区间</th><th>比最低渠道</th><th>计费重 / 金额</th><th>样本 / 更新</th></tr></thead><tbody>{channelComparisons.map((row) => {
             const difference = row.averageRate !== null && lowestChannelRate ? row.averageRate - lowestChannelRate : null;

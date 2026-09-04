@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, ArrowRight, Bot, Boxes, CheckCircle2, ClipboardList, PackageCheck, Truck } from "lucide-react";
+import { LieflatTickRows } from "./LieflatTickRows";
 
 export interface TransferRecord {
   pickupDate: string | null;
@@ -173,13 +174,13 @@ export function TransferControlTower({ report, onSendToAssistant }: Props) {
         {view === "overview" && <>
           <div className="ct-overview-grid">
             <section className="ct-panel">
-              <header><div><small>FLOW STATUS</small><h2>履约进度</h2></div><span>箱维度</span></header>
-              <div className="ct-stage-list">{stages.map(([label, value]) => <div key={label}><span>{label}</span><i><b style={{ width: `${filtered.length ? value / filtered.length * 100 : 0}%` }} /></i><strong>{number.format(value)}</strong></div>)}</div>
+              <header><div><small>FLOW STATUS</small><h2>履约推进到哪个节点</h2></div><span>箱维度</span></header>
+              <LieflatTickRows rows={stages.map(([label, value], index) => ({ label, value, detail: percent(value, filtered.length), highlight: index === stages.length - 1 }))} formatValue={(value) => number.format(value)} unitLabel={(unit) => `${number.format(unit)} 箱`} />
               <div className="ct-risk-strip"><span><b>{number.format(overdueReceipt)}</b> 超期未签收</span><span><b>{number.format(overdueShelf)}</b> 超期未上架</span><span><b>{number.format(missingTracking)}</b> 缺跟踪号</span></div>
             </section>
             <section className="ct-panel">
-              <header><div><small>CARRIER SHARE</small><h2>物流商箱量占比</h2></div><span>TOP 6</span></header>
-              <div className="ct-provider-bars">{providerRows.slice(0, 6).map((row) => <button key={row.name} onClick={() => setFilters((current) => ({ ...current, provider: row.name }))}><span>{row.name}</span><i><b style={{ width: `${filtered.length ? row.boxes / filtered.length * 100 : 0}%` }} /></i><strong>{percent(row.boxes, filtered.length)}</strong></button>)}</div>
+              <header><div><small>CARRIER SHARE</small><h2>箱量集中在哪些物流商</h2></div><span>点击筛选</span></header>
+              <LieflatTickRows rows={providerRows.slice(0, 6).map((row, index) => ({ label: row.name, value: row.boxes, detail: percent(row.boxes, filtered.length), highlight: index === 0 }))} formatValue={(value) => number.format(value)} unitLabel={(unit) => `${number.format(unit)} 箱`} onSelect={(row) => setFilters((current) => ({ ...current, provider: row.label }))} />
             </section>
           </div>
           <section className="ct-panel ct-priority">
