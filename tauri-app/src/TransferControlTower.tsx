@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, ArrowRight, Bot, Boxes, CheckCircle2, ClipboardList, PackageCheck, Truck } from "lucide-react";
-import { LieflatTickRows } from "./LieflatTickRows";
 
 export interface TransferRecord {
   pickupDate: string | null;
@@ -175,12 +174,12 @@ export function TransferControlTower({ report, onSendToAssistant }: Props) {
           <div className="ct-overview-grid">
             <section className="ct-panel">
               <header><div><small>FLOW STATUS</small><h2>履约推进到哪个节点</h2></div><span>箱维度</span></header>
-              <LieflatTickRows rows={stages.map(([label, value], index) => ({ label, value, detail: percent(value, filtered.length), highlight: index === stages.length - 1 }))} formatValue={(value) => number.format(value)} unitLabel={(unit) => `${number.format(unit)} 箱`} />
+              <div className="ct-compact-table"><table><thead><tr><th>履约节点</th><th>箱数</th><th>占比</th></tr></thead><tbody>{stages.map(([label, value]) => <tr key={label}><td><strong>{label}</strong></td><td>{number.format(value)}</td><td>{percent(value, filtered.length)}</td></tr>)}</tbody></table></div>
               <div className="ct-risk-strip"><span><b>{number.format(overdueReceipt)}</b> 超期未签收</span><span><b>{number.format(overdueShelf)}</b> 超期未上架</span><span><b>{number.format(missingTracking)}</b> 缺跟踪号</span></div>
             </section>
             <section className="ct-panel">
               <header><div><small>CARRIER SHARE</small><h2>箱量集中在哪些物流商</h2></div><span>点击筛选</span></header>
-              <LieflatTickRows rows={providerRows.slice(0, 6).map((row, index) => ({ label: row.name, value: row.boxes, detail: percent(row.boxes, filtered.length), highlight: index === 0 }))} formatValue={(value) => number.format(value)} unitLabel={(unit) => `${number.format(unit)} 箱`} onSelect={(row) => setFilters((current) => ({ ...current, provider: row.label }))} />
+              <div className="ct-compact-table"><table><thead><tr><th>物流商</th><th>承运箱数</th><th>箱量占比</th><th></th></tr></thead><tbody>{providerRows.slice(0, 6).map((row) => <tr key={row.name}><td><strong>{row.name}</strong></td><td>{number.format(row.boxes)}</td><td>{percent(row.boxes, filtered.length)}</td><td><button onClick={() => setFilters((current) => ({ ...current, provider: row.name }))}>筛选</button></td></tr>)}</tbody></table></div>
             </section>
           </div>
           <section className="ct-panel ct-priority">
