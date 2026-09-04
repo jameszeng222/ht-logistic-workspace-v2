@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, Bot, CircleDollarSign, FileWarning, Scale, Truck } from "lucide-react";
+import { Bot, CircleDollarSign, FileWarning, Scale } from "lucide-react";
 
 export interface LogisticsQuoteRecord {
   pickupDate: string | null;
@@ -78,7 +78,6 @@ export function LogisticsQuoteDashboard({ report, onSendToAssistant }: Props) {
   const orders = new Set(filtered.map((record) => record.order).filter(Boolean)).size;
   const totalAmount = filtered.reduce((sum, record) => sum + (record.total || 0), 0);
   const totalWeight = filtered.reduce((sum, record) => sum + (record.billingWeight || 0), 0);
-  const totalBoxes = filtered.reduce((sum, record) => sum + (record.boxes || 0), 0);
   const validRates = filtered.filter((record) => record.unitPrice !== null);
   const averageRate = validRates.length ? validRates.reduce((sum, record) => sum + (record.unitPrice || 0), 0) / validRates.length : 0;
 
@@ -303,13 +302,6 @@ export function LogisticsQuoteDashboard({ report, onSendToAssistant }: Props) {
     </div>
 
     <div className="ct-scroll">
-      <section className="ct-kpis">
-        <article><span><CircleDollarSign size={15} />记录总金额</span><strong>{amountLabel(totalAmount)}</strong><small>{number.format(filtered.length)} 条报价记录</small></article>
-        <article><span><Truck size={15} />运输批次</span><strong>{number.format(orders)}</strong><small>{number.format(providerRows.length)} 家物流商</small></article>
-        <article><span><Scale size={15} />计费重量</span><strong>{totalWeight ? number.format(totalWeight) : "—"}</strong><small>{number.format(totalBoxes)} 箱</small></article>
-        <article className={complexRates ? "warning" : ""}><span><AlertTriangle size={15} />平均单价</span><strong>{averageRate ? money.format(averageRate) : "—"}</strong><small>{complexRates} 条复杂报价待复核</small></article>
-      </section>
-
       {view === "overview" && <div className="ct-overview-grid">
         <section className="ct-panel"><header><div><small>CARRIER COST</small><h2>物流商报价汇总</h2></div><span>{providerRows.length} 家物流商</span></header><div className="ct-compact-table"><table><thead><tr><th>物流商</th><th>报价记录</th><th>平均单价</th><th>记录金额</th><th></th></tr></thead><tbody>{providerRows.slice(0, 8).map((row) => <tr key={row.name}><td><strong>{row.name}</strong></td><td>{row.records} 条</td><td>{row.averageRate ? money.format(row.averageRate) : "—"}</td><td>{amountLabel(row.amount)}</td><td><button onClick={() => openProviderChannels(row.name)}>查看渠道</button></td></tr>)}</tbody></table></div></section>
         <section className="ct-panel"><header><div><small>ROUTE COVERAGE</small><h2>可比线路</h2></div><span>按物流商数</span></header><div className="lq-route-list">{routeRows.slice(0, 8).map((row) => <button key={row.key} onClick={() => { setSelectedRouteKey(row.key); setView("rates"); }}><span><strong>{row.route}</strong><small>{row.transport} · {row.providerCount} 家物流商</small></span><b>查看 {row.records} 条</b></button>)}</div></section>
